@@ -1,14 +1,26 @@
 import cv2
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from PIL import Image
 
 import config
 from core.car_tracker import track_cars
 from core.plate_detector import detect_plates
 from core.plate_ocr import ocr_yolo
+from core.plate_utils import separate_chars
 from core.plate_aggregator import PlateAggregator, PlateReading
-from utils.preprocessing import ensure_valid_bbox
+from core.enhancement import enhance
+from utils.preprocessing import ensure_valid_bbox, put_arabic_text
+
+
+@dataclass
+class TrackedCar:
+    track_id: int
+    car_class: str
+    best_crop: object = None  # numpy array
+    best_frame_num: int = 0
+    first_seen: int = 0
 
 
 @dataclass
@@ -17,50 +29,19 @@ class VideoProcessStats:
     processed_frames: int = 0
     plates_detected: int = 0
     unique_plates: int = 0
+    total_cars: int = 0
     processing_fps: float = 0.0
     elapsed_time: float = 0.0
 
 
 def _crop_car(frame, bbox):
-    """Crop a car region from a frame."""
     x1, y1, x2, y2 = [int(v) for v in bbox]
     h, w = frame.shape[:2]
-    x1 = max(0, x1)
-    y1 = max(0, y1)
-    x2 = min(w, x2)
-    y2 = min(h, y2)
-    return frame[y1:y2, x1:x2]
+    return frame[max(0, y1):min(h, y2), max(0, x1):min(w, x2)]
 
 
-def _build_plate_text(detections):
-    """Build plate text from sorted detections."""
-    chars = []
-    nums = []
-    for det in detections:
-        if det.class_name.isdigit():
-            nums.append(det.class_name)
-        else:
-            chars.append(det.class_name)
-    parts = []
-    if nums:
-        parts.append(" ".join(nums))
-    if chars:
-        parts.append(" ".join(chars))
-    return " | ".join(parts)
-
-
-def process_video(video_path, output_path=None, progress_callback=None, frame_skip=1):
-    """Process a video file with car tracking → plate detection → OCR → deduplication.
-
-    Args:
-        video_path: Path to input video file.
-        output_path: Path to save annotated output. If None, uses temp file.
-        progress_callback: Callable(progress_fraction, stats_dict) called per frame.
-        frame_skip: Process every Nth frame (1 = every frame).
-
-    Returns:
-        (output_path, VideoProcessStats, list[UniquePlate])
-    """
+def process_video(video_path, output_path=None, progress_callback=None,
+                  result_callback=None, frame_skip=1, enhance_method="combined"):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"Cannot open video: {video_path}")
@@ -83,6 +64,10 @@ def process_video(video_path, output_path=None, progress_callback=None, frame_sk
     start_time = time.time()
     current_frame = 0
     total_plates = 0
+    good_tracks: set[int] = set()
+
+    # Track ALL cars (with and without plates)
+    all_cars: dict[int, TrackedCar] = {}
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -96,87 +81,109 @@ def process_video(video_path, output_path=None, progress_callback=None, frame_sk
             continue
 
         try:
-            # Step 1: Detect and track cars
             car_tracks = track_cars(frame, persist=True)
 
             for car in car_tracks:
-                # Draw car bounding box (blue)
                 cx1, cy1, cx2, cy2 = [int(v) for v in car.bbox]
-                cv2.rectangle(frame, (cx1, cy1), (cx2, cy2), (255, 150, 0), 2)
-                cv2.putText(frame, f"Car #{car.track_id}", (cx1, cy1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 150, 0), 2)
-
-                # Step 2: Crop car region and detect plate inside
                 car_crop = _crop_car(frame, car.bbox)
+
+                # Always draw car box
+                cv2.rectangle(frame, (cx1, cy1), (cx2, cy2), (0, 0, 255), 2)
+                cv2.putText(frame, f"Car #{car.track_id}", (cx1, cy1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+                # Track this car (save best crop)
+                if car.track_id not in all_cars:
+                    all_cars[car.track_id] = TrackedCar(
+                        track_id=car.track_id,
+                        car_class=car.class_name,
+                        first_seen=current_frame,
+                    )
+                if car_crop.size > 0:
+                    car_obj = all_cars[car.track_id]
+                    prev_area = car_obj.best_crop.shape[0] * car_obj.best_crop.shape[1] if car_obj.best_crop is not None else 0
+                    curr_area = car_crop.shape[0] * car_crop.shape[1]
+                    if curr_area > prev_area:
+                        car_obj.best_crop = car_crop.copy()
+                        car_obj.best_frame_num = current_frame
+
+                # Skip OCR if already has good reading
+                if car.track_id in good_tracks:
+                    continue
+
                 if car_crop.size == 0:
                     continue
 
-                # Convert car crop to PIL for plate detector
-                from PIL import Image
                 car_pil = Image.fromarray(cv2.cvtColor(car_crop, cv2.COLOR_BGR2RGB))
                 plate_dets = detect_plates(car_pil)
-
                 if not plate_dets:
                     continue
 
                 plate = plate_dets[0]
                 total_plates += 1
 
-                # Convert plate bbox from car-crop coords to frame coords
                 px1, py1, px2, py2 = [int(v) for v in plate.bbox]
-                fx1 = cx1 + px1
-                fy1 = cy1 + py1
-                fx2 = cx1 + px2
-                fy2 = cy1 + py2
+                fx1, fy1 = cx1 + px1, cy1 + py1
+                fx2, fy2 = cx1 + px2, cy1 + py2
                 fx1, fy1, fx2, fy2 = ensure_valid_bbox(
                     (fx1, fy1, fx2, fy2), frame_width, frame_height
                 )
 
-                # Draw plate bounding box (green)
                 cv2.rectangle(frame, (fx1, fy1), (fx2, fy2), (0, 255, 0), 2)
                 cv2.putText(frame, "Plate", (fx1, fy1 - 8),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-                # Step 3: OCR on the plate crop
                 plate_crop = frame[fy1:fy2, fx1:fx2]
                 if plate_crop.size == 0:
                     continue
 
-                detections, _ = ocr_yolo(plate_crop)
+                # Apply enhancement before OCR
+                enhanced_crop = enhance(plate_crop, method=enhance_method)
 
-                # Draw character boxes
-                for det in detections:
-                    dx1 = int(det.bbox[0]) + fx1
-                    dy1 = int(det.bbox[1]) + fy1
-                    dx2 = int(det.bbox[2]) + fx1
-                    dy2 = int(det.bbox[3]) + fy1
-                    cv2.rectangle(frame, (dx1, dy1), (dx2, dy2), (0, 165, 255), 1)
-                    cv2.putText(frame, det.class_name, (dx1, dy1 - 3),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 165, 255), 1)
+                detections, ocr_annotated = ocr_yolo(enhanced_crop)
+                chars = separate_chars(detections)
 
-                plate_text = _build_plate_text(detections)
-
-                if plate_text:
-                    cv2.putText(frame, plate_text, (fx1, fy2 + 20),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-
-                # Calculate average OCR confidence
                 avg_conf = (
                     sum(d.confidence for d in detections) / len(detections)
                     if detections else 0.0
                 )
 
-                # Step 4: Store reading for deduplication
-                reading = PlateReading(
-                    track_id=car.track_id,
-                    frame_num=current_frame,
-                    plate_text=plate_text,
-                    confidence=avg_conf,
-                    car_bbox=(cx1, cy1, cx2, cy2),
-                    plate_bbox=(fx1, fy1, fx2, fy2),
-                    frame_image=frame.copy(),
-                )
-                aggregator.add_reading(reading, car_class=car.class_name)
+                # Draw annotations
+                for det in detections:
+                    dx1 = int(det.bbox[0]) + fx1
+                    dy1 = int(det.bbox[1]) + fy1
+                    dx2 = int(det.bbox[2]) + fx1
+                    dy2 = int(det.bbox[3]) + fy1
+                    cv2.rectangle(frame, (dx1, dy1), (dx2, dy2), (0, 255, 0), 1)
+                    if det.class_name.isdigit():
+                        cv2.putText(frame, det.class_name, (dx1, dy1 - 3),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+                    else:
+                        put_arabic_text(frame, det.class_name, (dx1, dy1 - 18),
+                                        font_size=12, color=(0, 255, 0))
+
+                if chars.text:
+                    put_arabic_text(frame, chars.text, (fx1, fy2 + 5),
+                                    font_size=18, color=(0, 255, 0))
+
+                if avg_conf >= config.VIDEO_OCR_MIN_CONFIDENCE:
+                    reading = PlateReading(
+                        track_id=car.track_id,
+                        frame_num=current_frame,
+                        plate_text=chars.text,
+                        confidence=avg_conf,
+                        car_bbox=(cx1, cy1, cx2, cy2),
+                        plate_bbox=(fx1, fy1, fx2, fy2),
+                        car_crop_image=car_crop.copy(),
+                        plate_crop_image=plate_crop.copy(),
+                        ocr_annotated_image=ocr_annotated.copy() if ocr_annotated is not None else None,
+                        detections=detections,
+                    )
+                    aggregator.add_reading(reading, car_class=car.class_name)
+                    good_tracks.add(car.track_id)
+
+                    if result_callback:
+                        result_callback(reading, car.class_name)
 
         except Exception as e:
             print(f"Error processing frame {current_frame}: {e}")
@@ -184,16 +191,35 @@ def process_video(video_path, output_path=None, progress_callback=None, frame_sk
         out.write(frame)
         stats.processed_frames = current_frame
         stats.plates_detected = total_plates
+        stats.total_cars = len(all_cars)
 
         if progress_callback:
             progress_callback(current_frame / max(total_frames, 1), {
                 "frame": current_frame,
                 "total": total_frames,
                 "plates": total_plates,
+                "unique": len(good_tracks),
+                "cars": len(all_cars),
             })
 
-    # Finalize: deduplicate plates by track
     unique_plates = aggregator.finalize()
+
+    # Separate cars with and without plates
+    plate_track_ids = {p.car_track_id for p in unique_plates}
+    cars_without_plates = []
+    for tid, car in all_cars.items():
+        if tid not in plate_track_ids:
+            cars_without_plates.append(car)
+    cars_without_plates.sort(key=lambda c: c.first_seen)
+
+    # Attach best frame images for plates
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    best_frames = {p.best_frame_num: p for p in unique_plates}
+    for frame_idx in sorted(best_frames.keys()):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx - 1)
+        ret, frame = cap.read()
+        if ret:
+            best_frames[frame_idx].best_frame_image = frame.copy()
 
     elapsed = time.time() - start_time
     stats.elapsed_time = elapsed
@@ -203,4 +229,158 @@ def process_video(video_path, output_path=None, progress_callback=None, frame_sk
     cap.release()
     out.release()
 
-    return output_path, stats, unique_plates
+    return output_path, stats, unique_plates, cars_without_plates
+
+
+# ── Interactive video pipeline functions ──
+
+
+@dataclass
+class ScannedCar:
+    track_id: int
+    car_class: str
+    best_crop: object = None  # numpy array
+    best_frame_num: int = 0
+    first_seen_frame: int = 0
+
+
+@dataclass
+class PlateCandidate:
+    frame_num: int
+    plate_crop: object = None  # numpy array (BGR)
+    plate_bbox: tuple = None   # (x1, y1, x2, y2) in frame coords
+    car_crop: object = None    # numpy array (BGR)
+    crop_area: float = 0.0
+
+
+def scan_video_cars(video_path, progress_callback=None):
+    """Scan a video to find all unique cars via ByteTrack tracking.
+
+    Returns list of ScannedCar sorted by first_seen_frame.
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Cannot open video: {video_path}")
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    all_cars: dict[int, ScannedCar] = {}
+    current_frame = 0
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        current_frame += 1
+
+        try:
+            car_tracks = track_cars(frame, persist=True)
+
+            for car in car_tracks:
+                car_crop = _crop_car(frame, car.bbox)
+                if car_crop.size == 0:
+                    continue
+
+                if car.track_id not in all_cars:
+                    all_cars[car.track_id] = ScannedCar(
+                        track_id=car.track_id,
+                        car_class=car.class_name,
+                        first_seen_frame=current_frame,
+                    )
+
+                car_obj = all_cars[car.track_id]
+                curr_area = car_crop.shape[0] * car_crop.shape[1]
+                prev_area = car_obj.best_crop.shape[0] * car_obj.best_crop.shape[1] if car_obj.best_crop is not None else 0
+                if curr_area > prev_area:
+                    car_obj.best_crop = car_crop.copy()
+                    car_obj.best_frame_num = current_frame
+        except Exception as e:
+            print(f"Error scanning frame {current_frame}: {e}")
+
+        if progress_callback:
+            progress_callback(current_frame / max(total_frames, 1), {
+                "frame": current_frame,
+                "total": total_frames,
+                "cars": len(all_cars),
+            })
+
+    cap.release()
+
+    cars = sorted(all_cars.values(), key=lambda c: c.first_seen_frame)
+    return cars
+
+
+def find_plate_crops(video_path, target_track_id, top_n=5):
+    """Find plate crop candidates for a specific tracked car in a video.
+
+    Seeks through all frames, runs plate detection only on frames where the
+    target car appears, returns top_n candidates sorted by crop area (largest first).
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Cannot open video: {video_path}")
+
+    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    current_frame = 0
+    candidates: list[PlateCandidate] = []
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        current_frame += 1
+
+        try:
+            car_tracks = track_cars(frame, persist=True)
+
+            for car in car_tracks:
+                if car.track_id != target_track_id:
+                    continue
+
+                car_crop = _crop_car(frame, car.bbox)
+                if car_crop.size == 0:
+                    continue
+
+                cx1, cy1 = int(car.bbox[0]), int(car.bbox[1])
+                car_pil = Image.fromarray(cv2.cvtColor(car_crop, cv2.COLOR_BGR2RGB))
+                plate_dets = detect_plates(car_pil)
+                if not plate_dets:
+                    continue
+
+                plate = plate_dets[0]
+                px1, py1, px2, py2 = [int(v) for v in plate.bbox]
+
+                # Plate crop in frame coordinates
+                fx1, fy1 = cx1 + px1, cy1 + py1
+                fx2, fy2 = cx1 + px2, cy1 + py2
+                fx1, fy1, fx2, fy2 = ensure_valid_bbox(
+                    (fx1, fy1, fx2, fy2), frame_width, frame_height
+                )
+
+                plate_crop = frame[fy1:fy2, fx1:fx2]
+                if plate_crop.size == 0:
+                    continue
+
+                crop_area = (fx2 - fx1) * (fy2 - fy1)
+
+                # Skip if very similar frame already captured (deduplicate by area proximity)
+                is_dup = any(abs(c.crop_area - crop_area) / max(crop_area, 1) < 0.1 for c in candidates)
+                if is_dup:
+                    continue
+
+                candidates.append(PlateCandidate(
+                    frame_num=current_frame,
+                    plate_crop=plate_crop.copy(),
+                    plate_bbox=(fx1, fy1, fx2, fy2),
+                    car_crop=car_crop.copy(),
+                    crop_area=crop_area,
+                ))
+        except Exception as e:
+            print(f"Error finding plates at frame {current_frame}: {e}")
+
+    cap.release()
+
+    # Sort by crop area descending, take top_n
+    candidates.sort(key=lambda c: c.crop_area, reverse=True)
+    return candidates[:top_n]
