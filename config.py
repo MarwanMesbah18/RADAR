@@ -4,8 +4,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Model paths
 MODELS_DIR = os.path.join(BASE_DIR, "models")
-PLATE_MODEL_PATH = os.path.join(MODELS_DIR, "yolo11m_car_plate_trained.pt")
-PLATE_OCR_MODEL_PATH = os.path.join(MODELS_DIR, "yolo11m_car_plate_ocr.pt")
+PLATE_MODEL_PATH = os.path.join(MODELS_DIR, "yolo11m_car_plate_trained_V1.pt")
+PLATE_OCR_MODEL_PATH = os.path.join(MODELS_DIR, "yolo11m_car_plate_ocr_V1.pt")
 
 # Detection thresholds
 PLATE_CONFIDENCE = 0.25
@@ -25,7 +25,7 @@ FRANCO_TO_ARABIC = {
     'haa': 'ھ', '7aa': 'ح', 'waw': 'و', 'zaal': 'ذ',
     'raa': 'ر', 'zay': 'ز', 'seen': 'س', 'sheen': 'ش',
     'saad': 'ص', 'daad': 'ض', 'taa': 'ت', 'Taa': 'ط',
-    'thaa': 'ث', 'Thaa': 'ث', 'ain': 'ع', 'ghayn': 'غ',
+    'thaa': 'ث', 'Thaa': 'ظ', 'ain': 'ع', 'ghayn': 'غ',
     'faa': 'ف', 'qaaf': 'ق', 'kaaf': 'ك', 'laam': 'ل',
     'meem': 'م', 'noon': 'ن', 'khaa': 'خ', 'yaa': 'ي',
 }
