@@ -35,7 +35,7 @@ def render_photo_tab():
     tmp_path = st.session_state["tmp_file"]
     img = cv2.imread(tmp_path)
     if img is not None:
-        show_image(img, "Original Image", width=5)
+        show_image(img, "Original Image", width=3)
 
     st.markdown("---")
 
@@ -104,46 +104,48 @@ def _render_cars_mode(tmp_path):
         st.warning("No vehicles detected.")
         return
 
-    if result.all_cars_image is not None:
-        show_image(result.all_cars_image, "All detected vehicles", width=5)
+    st.markdown("---")
+
+    # Clickable car cards in a grid
+    cols_per_row = 4
+    car_keys = [f"car_btn_{i}" for i in range(len(result.vehicles))]
+
+    for i in range(0, len(result.vehicles), cols_per_row):
+        row = st.columns(cols_per_row)
+        for j, v in enumerate(result.vehicles[i:i + cols_per_row]):
+            idx = i + j
+            with row[j]:
+                has_plate = v.plate_detection is not None
+                badge_color = "🟢" if has_plate else "🔴"
+                badge_text = "Plate found" if has_plate else "No plate"
+                st.markdown(f"{badge_color} **{badge_text}**")
+                if v.steps and v.steps.car_crop is not None:
+                    st.image(v.steps.car_crop, channels="BGR")
+                if st.button(f"Select Car #{idx + 1}", key=car_keys[idx],
+                             use_container_width=True):
+                    st.session_state["selected_car"] = idx
 
     st.markdown("---")
 
-    # Car selection
-    car_options = {}
-    cars_with_plates = [(i, v) for i, v in enumerate(result.vehicles) if v.plate_detection is not None]
-    cars_without = [(i, v) for i, v in enumerate(result.vehicles) if v.plate_detection is None]
-
-    for i, v in cars_with_plates:
-        car_options[f"Car #{i + 1} (plate found)"] = i
-    for i, v in cars_without:
-        car_options[f"Car #{i + 1} (no plate)"] = i
-
-    if not car_options:
-        st.warning("No cars detected.")
+    idx = st.session_state.get("selected_car")
+    if idx is None:
+        st.info("Click a car above to analyze its plate.")
         return
 
-    selected_label = st.selectbox("Choose a car:", list(car_options.keys()), index=0)
-    st.session_state["selected_car"] = car_options[selected_label]
-
-    if not st.button("🔢 Show Plate & OCR", type="primary", use_container_width=True):
-        return
-
-    idx = st.session_state.get("selected_car", 0)
     v = result.vehicles[idx]
 
     # Show car crop
     if v.steps and v.steps.car_crop is not None:
-        st.markdown("**Vehicle Crop**")
+        st.markdown("**Selected Vehicle**")
         st.image(v.steps.car_crop, channels="BGR")
 
     if v.plate_detection is None:
         st.info("No plate detected on this car.")
         return
 
-    # Show plate crop
+    # Show plate crop with confidence
+    st.markdown(f"**Plate** (confidence: {v.plate_detection.confidence:.0%})")
     if v.steps and v.steps.plate_crop is not None:
-        st.markdown("**Plate Crop**")
         st.image(v.steps.plate_crop, channels="BGR")
 
     st.markdown("---")
