@@ -242,6 +242,7 @@ class ScannedCar:
     best_crop: object = None  # numpy array
     best_frame_num: int = 0
     first_seen_frame: int = 0
+    best_bbox: tuple = None   # (x1, y1, x2, y2) in frame coords
 
 
 @dataclass
@@ -251,6 +252,18 @@ class PlateCandidate:
     plate_bbox: tuple = None   # (x1, y1, x2, y2) in frame coords
     car_crop: object = None    # numpy array (BGR)
     crop_area: float = 0.0
+
+
+def _bbox_iou(a, b):
+    """IoU between two bboxes (x1,y1,x2,y2)."""
+    x1 = max(a[0], b[0])
+    y1 = max(a[1], b[1])
+    x2 = min(a[2], b[2])
+    y2 = min(a[3], b[3])
+    inter = max(0, x2 - x1) * max(0, y2 - y1)
+    area_a = (a[2] - a[0]) * (a[3] - a[1])
+    area_b = (b[2] - b[0]) * (b[3] - b[1])
+    return inter / max(area_a + area_b - inter, 1)
 
 
 def scan_video_cars(video_path, progress_callback=None):
@@ -293,6 +306,7 @@ def scan_video_cars(video_path, progress_callback=None):
                 if curr_area > prev_area:
                     car_obj.best_crop = car_crop.copy()
                     car_obj.best_frame_num = current_frame
+                    car_obj.best_bbox = tuple(int(v) for v in car.bbox)
         except Exception as e:
             print(f"Error scanning frame {current_frame}: {e}")
 
@@ -303,9 +317,30 @@ def scan_video_cars(video_path, progress_callback=None):
                 "cars": len(all_cars),
             })
 
-    cap.release()
+    # Deduplicate: merge tracks that are likely the same car
+    car_list = list(all_cars.values())
+    merged = []
+    used = set()
+    for i, c1 in enumerate(car_list):
+        if i in used:
+            continue
+        group = [c1]
+        for j in range(i + 1, len(car_list)):
+            if j in used:
+                continue
+            c2 = car_list[j]
+            if c1.car_class == c2.car_class and c1.best_bbox and c2.best_bbox:
+                iou = _bbox_iou(c1.best_bbox, c2.best_bbox)
+                if iou > 0.3:
+                    group.append(c2)
+                    used.add(j)
+        # Pick the one with largest crop
+        best_in_group = max(group, key=lambda c: c.best_crop.shape[0] * c.best_crop.shape[1] if c.best_crop is not None else 0)
+        merged.append(best_in_group)
+        used.add(i)
 
-    cars = sorted(all_cars.values(), key=lambda c: c.first_seen_frame)
+    cap.release()
+    cars = sorted(merged, key=lambda c: c.first_seen_frame)
     return cars
 
 
