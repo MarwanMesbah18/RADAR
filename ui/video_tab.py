@@ -7,7 +7,7 @@ from ui.display import show_enhancement_comparison
 
 def _reset_scan():
     for key in ["video_cars", "video_selected_car", "video_plate_mode",
-                "video_plate_crop", "video_candidates"]:
+                "video_plate_crop", "video_candidates", "video_selected_plate"]:
         st.session_state.pop(key, None)
 
 
@@ -24,14 +24,15 @@ def render_video_tab():
     tfile.write(uploaded_video.read())
     tfile.close()
 
-    with st.expander("Original Video", expanded=False):
-        st.video(tfile.name)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        with st.expander("Original Video", expanded=False):
+            st.video(tfile.name)
 
     st.markdown("---")
 
     # ── Step 1: Scan Video ──
     if not st.button("🎬 Scan Video", type="primary", use_container_width=True):
-        # If already scanned, show results
         if "video_cars" in st.session_state:
             _render_car_selection(tfile.name)
         return
@@ -59,79 +60,49 @@ def render_video_tab():
 
 
 def _render_car_selection(video_path):
-    """Show car grid and let user pick one."""
+    """Show car grid as clickable cards and let user pick one."""
     cars = st.session_state["video_cars"]
 
     st.markdown("### Detected Vehicles")
-    st.markdown(f"Found **{len(cars)}** unique vehicles in this video.")
+    st.markdown(f"Found **{len(cars)}** unique vehicles.")
 
-    # Car grid: 4 per row
+    # Car cards: 4 per row
     cols_per_row = 4
-    car_labels = []
     for i in range(0, len(cars), cols_per_row):
         row = st.columns(cols_per_row)
         for j, car in enumerate(cars[i:i + cols_per_row]):
+            idx = i + j
             with row[j]:
+                st.markdown(f"**Car #{idx + 1}** ({car.car_class})")
                 if car.best_crop is not None:
                     st.image(car.best_crop, channels="BGR")
-                label = f"Car #{car.track_id} ({car.car_class})"
-                st.caption(label)
-                car_labels.append(label)
+                if st.button(f"Select", key=f"car_sel_{idx}", use_container_width=True):
+                    st.session_state["video_selected_car"] = idx
 
     st.markdown("---")
 
-    selected = st.selectbox("Select a car to analyze:", car_labels, index=0)
-    selected_idx = car_labels.index(selected)
-    st.session_state["video_selected_car"] = selected_idx
+    selected_idx = st.session_state.get("video_selected_car")
+    if selected_idx is None:
+        st.info("Click a car above to analyze its plate.")
+        return
+
+    car = cars[selected_idx]
 
     # Mode buttons
     col_auto, col_manual = st.columns(2)
     with col_auto:
-        btn_auto = st.button("⚡ Auto Mode", type="primary", use_container_width=True)
+        st.button("⚡ Auto Mode (Coming Soon)", disabled=True, use_container_width=True)
     with col_manual:
-        btn_manual = st.button("🎯 Manual Mode", type="primary", use_container_width=True)
-
-    if btn_auto:
-        st.session_state["video_plate_mode"] = "auto"
-    elif btn_manual:
-        st.session_state["video_plate_mode"] = "manual"
+        if st.button("🎯 Manual Mode", type="primary", use_container_width=True):
+            st.session_state["video_plate_mode"] = "manual"
 
     mode = st.session_state.get("video_plate_mode")
-    if mode == "auto":
-        _render_auto_mode(video_path, cars[selected_idx])
-    elif mode == "manual":
-        _render_manual_mode(video_path, cars[selected_idx])
-
-
-def _render_auto_mode(video_path, car):
-    """Auto: find the best plate crop for this car."""
-    st.markdown("### Auto Mode — Finding best plate...")
-
-    with st.spinner("Scanning frames for plate..."):
-        candidates = find_plate_crops(video_path, car.track_id, top_n=1)
-
-    if not candidates:
-        st.warning(f"No plate detected for Car #{car.track_id}.")
-        return
-
-    best = candidates[0]
-    st.success(f"Plate found at frame {best.frame_num} (crop area: {best.crop_area:.0f} px²)")
-
-    col_car, col_plate = st.columns(2)
-    with col_car:
-        st.markdown("**Vehicle**")
-        st.image(best.car_crop, channels="BGR")
-    with col_plate:
-        st.markdown("**Plate**")
-        st.image(best.plate_crop, channels="BGR")
-
-    st.markdown("---")
-    st.markdown("### Enhancement & OCR Comparison")
-    show_enhancement_comparison(best.plate_crop)
+    if mode == "manual":
+        _render_manual_mode(video_path, car)
 
 
 def _render_manual_mode(video_path, car):
-    """Manual: show multiple plate candidates, let user pick."""
+    """Manual: show plate candidate images as clickable cards."""
     st.markdown("### Manual Mode — Select best plate")
 
     if "video_candidates" not in st.session_state:
@@ -142,18 +113,30 @@ def _render_manual_mode(video_path, car):
     candidates = st.session_state["video_candidates"]
 
     if not candidates:
-        st.warning(f"No plate detected for Car #{car.track_id}.")
+        st.warning(f"No plate detected for this car.")
         return
 
-    # Show candidates
-    labels = [
-        f"Frame {c.frame_num} (area: {c.crop_area:.0f} px²)"
-        for c in candidates
-    ]
+    # Plate candidate cards: 3 per row
+    cols_per_row = 3
+    for i in range(0, len(candidates), cols_per_row):
+        row = st.columns(cols_per_row)
+        for j, c in enumerate(candidates[i:i + cols_per_row]):
+            idx = i + j
+            with row[j]:
+                st.markdown(f"**Frame {c.frame_num}**  ")
+                st.markdown(f"Area: `{c.crop_area:.0f} px²`")
+                st.image(c.plate_crop, channels="BGR")
+                if st.button("Select", key=f"plate_sel_{idx}", use_container_width=True):
+                    st.session_state["video_selected_plate"] = idx
 
-    selected_label = st.selectbox("Choose a plate candidate:", labels, index=0)
-    selected_idx = labels.index(selected_label)
-    chosen = candidates[selected_idx]
+    st.markdown("---")
+
+    plate_idx = st.session_state.get("video_selected_plate")
+    if plate_idx is None:
+        st.info("Click a plate candidate above to see the OCR comparison.")
+        return
+
+    chosen = candidates[plate_idx]
 
     col_car, col_plate = st.columns(2)
     with col_car:
