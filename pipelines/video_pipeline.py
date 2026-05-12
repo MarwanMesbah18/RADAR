@@ -317,7 +317,7 @@ def scan_video_cars(video_path, progress_callback=None):
                 "cars": len(all_cars),
             })
 
-    # Deduplicate: merge tracks that are likely the same car
+    # Deduplicate: only merge tracks that overlap heavily (same car, lost ID)
     car_list = list(all_cars.values())
     merged = []
     used = set()
@@ -329,11 +329,14 @@ def scan_video_cars(video_path, progress_callback=None):
             if j in used:
                 continue
             c2 = car_list[j]
-            if c1.car_class == c2.car_class and c1.best_bbox and c2.best_bbox:
-                iou = _bbox_iou(c1.best_bbox, c2.best_bbox)
-                if iou > 0.3:
-                    group.append(c2)
-                    used.add(j)
+            # Only merge if same class AND frames overlap (both visible at same time)
+            # AND bboxes nearly identical (same position = same car with split ID)
+            if (c1.car_class == c2.car_class
+                    and c1.best_bbox and c2.best_bbox
+                    and _bbox_iou(c1.best_bbox, c2.best_bbox) > 0.5
+                    and abs(c1.best_frame_num - c2.best_frame_num) < 30):
+                group.append(c2)
+                used.add(j)
         # Pick the one with largest crop
         best_in_group = max(group, key=lambda c: c.best_crop.shape[0] * c.best_crop.shape[1] if c.best_crop is not None else 0)
         merged.append(best_in_group)

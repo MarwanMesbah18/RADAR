@@ -125,6 +125,25 @@ def _render_cars_mode(tmp_path):
                              use_container_width=True):
                     st.session_state["selected_car"] = idx
 
+    # ── Filtered: only cars with plates ──
+    cars_with_plates = [(i, v) for i, v in enumerate(result.vehicles) if v.plate_detection is not None]
+    if cars_with_plates:
+        st.markdown("---")
+        st.markdown("### Cars with Plates")
+        filtered_keys = [f"filtered_btn_{i}" for i, _ in cars_with_plates]
+
+        for fi in range(0, len(cars_with_plates), cols_per_row):
+            row = st.columns(cols_per_row)
+            for fj, (idx, v) in enumerate(cars_with_plates[fi:fi + cols_per_row]):
+                with row[fj]:
+                    conf = v.plate_detection.confidence
+                    st.markdown(f"🟢 **Plate: {conf:.0%}**")
+                    if v.steps and v.steps.car_crop is not None:
+                        st.image(v.steps.car_crop, channels="BGR")
+                    if st.button(f"Select Car #{idx + 1}", key=filtered_keys[fi + fj],
+                                 use_container_width=True):
+                        st.session_state["selected_car"] = idx
+
     st.markdown("---")
 
     idx = st.session_state.get("selected_car")
