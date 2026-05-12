@@ -63,3 +63,31 @@ def pil_to_cv2(image):
 def cv2_to_pil(image):
     """Convert OpenCV BGR numpy array to PIL Image."""
     return Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+
+
+def put_arabic_text(img, text, position, font_size=20, color=(255, 255, 255)):
+    """Draw Arabic/Unicode text on an OpenCV image using PIL.
+
+    Args:
+        img: numpy array (BGR) to draw on.
+        text: string to render (supports Arabic/Unicode).
+        position: (x, y) top-left corner.
+        font_size: font size in pixels.
+        color: (R, G, B) text color.
+    Returns:
+        Modified image (in-place).
+    """
+    from PIL import ImageDraw, ImageFont
+    import os
+
+    font_path = "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf"
+    if not os.path.exists(font_path):
+        # Fallback to DejaVu which also has some Unicode support
+        font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+    font = ImageFont.truetype(font_path, font_size)
+    pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(pil_img)
+    draw.text(position, text, font=font, fill=color)
+    img[:] = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+    return img

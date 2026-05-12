@@ -5,12 +5,16 @@ from core.enhancement import enhance_lapsrn, enhance_realesrgan
 from core.plate_ocr import ocr_plate
 
 
-def show_image(img_bgr, caption=None, width=3):
+def show_image(img_bgr, caption=None, width=3, max_height=300):
     """Display a BGR image centered in constrained columns.
 
     width: 2=narrow (crops), 3=medium, 5=wide (full frames)
+    max_height: max pixel height before downscaling (0 = no limit)
     """
     rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB) if len(img_bgr.shape) == 3 else img_bgr
+    if max_height > 0 and rgb.shape[0] > max_height:
+        scale = max_height / rgb.shape[0]
+        rgb = cv2.resize(rgb, (int(rgb.shape[1] * scale), max_height))
     c1, c2, c3 = st.columns([1, width, 1])
     with c2:
         st.image(rgb, caption=caption)
@@ -74,17 +78,23 @@ def show_enhancement_comparison(plate_crop):
     with col_orig:
         st.markdown("**Original**")
         st.image(plate_crop, channels="BGR")
+        if ocr_orig.annotated_image is not None:
+            st.image(ocr_orig.annotated_image)
         st.markdown(f"Plate: `{ocr_orig.text or '—'}`")
         st.markdown(f"Confidence: `{ocr_orig.confidence:.0%}`")
 
     with col_lap:
         st.markdown("**LapSRN (AI Light)**")
         st.image(lapsrn_img, channels="BGR")
+        if ocr_lap.annotated_image is not None:
+            st.image(ocr_lap.annotated_image)
         st.markdown(f"Plate: `{ocr_lap.text or '—'}`")
         st.markdown(f"Confidence: `{ocr_lap.confidence:.0%}`")
 
     with col_esrgan:
         st.markdown("**Real-ESRGAN (AI Heavy)**")
         st.image(esrgan_img, channels="BGR")
+        if ocr_esrgan.annotated_image is not None:
+            st.image(ocr_esrgan.annotated_image)
         st.markdown(f"Plate: `{ocr_esrgan.text or '—'}`")
         st.markdown(f"Confidence: `{ocr_esrgan.confidence:.0%}`")

@@ -24,7 +24,7 @@ def render_video_tab():
     tfile.write(uploaded_video.read())
     tfile.close()
 
-    c1, c2, c3 = st.columns([1, 2, 1])
+    c1, c2, c3 = st.columns([2, 1, 2])
     with c2:
         with st.expander("Original Video", expanded=False):
             st.video(tfile.name)
@@ -107,7 +107,7 @@ def _render_manual_mode(video_path, car):
 
     if "video_candidates" not in st.session_state:
         with st.spinner("Scanning frames for plate candidates..."):
-            candidates = find_plate_crops(video_path, car.track_id, top_n=5)
+            candidates = find_plate_crops(video_path, car, top_n=5)
             st.session_state["video_candidates"] = candidates
 
     candidates = st.session_state["video_candidates"]

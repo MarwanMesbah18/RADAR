@@ -344,11 +344,13 @@ def scan_video_cars(video_path, progress_callback=None):
     return cars
 
 
-def find_plate_crops(video_path, target_track_id, top_n=5):
-    """Find plate crop candidates for a specific tracked car in a video.
+def find_plate_crops(video_path, scanned_car, top_n=5):
+    """Find plate crop candidates for a specific scanned car.
 
-    Seeks through all frames, runs plate detection only on frames where the
-    target car appears, returns top_n candidates sorted by crop area (largest first).
+    Matches by spatial proximity to scanned_car.best_bbox (not track ID),
+    since ByteTrack assigns fresh IDs on each pass.
+
+    scanned_car: ScannedCar object with best_bbox set.
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -359,6 +361,7 @@ def find_plate_crops(video_path, target_track_id, top_n=5):
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     current_frame = 0
     candidates: list[PlateCandidate] = []
+    ref_bbox = scanned_car.best_bbox
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -370,7 +373,13 @@ def find_plate_crops(video_path, target_track_id, top_n=5):
             car_tracks = track_cars(frame, persist=True)
 
             for car in car_tracks:
-                if car.track_id != target_track_id:
+                # Match by position, not track ID
+                if ref_bbox is not None:
+                    car_bbox = tuple(int(v) for v in car.bbox)
+                    if _bbox_iou(ref_bbox, car_bbox) < 0.15:
+                        continue
+
+                if car.class_name != scanned_car.car_class:
                     continue
 
                 car_crop = _crop_car(frame, car.bbox)

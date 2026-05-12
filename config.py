@@ -11,6 +11,7 @@ PLATE_OCR_MODEL_PATH = os.path.join(MODELS_DIR, "yolo11m_car_plate_ocr.pt")
 PLATE_CONFIDENCE = 0.25
 OCR_CONFIDENCE = 0.25
 OCR_CHAR_MIN_CONFIDENCE = 0.4
+VIDEO_OCR_MIN_CONFIDENCE = 0.75  # Only store readings >= 75% confidence in video
 
 # Car detection (YOLOv11n COCO pretrained)
 CAR_MODEL_PATH = os.path.join(MODELS_DIR, "yolo11n.pt")
@@ -21,7 +22,7 @@ TRACK_BUFFER = 30  # ByteTrack track persistence (frames)
 # Franco → Arabic character mapping (OCR model uses transliterated class names)
 FRANCO_TO_ARABIC = {
     'alif': 'ا', 'baa': 'ب', 'jeem': 'ج', 'daal': 'د',
-    'haa': 'ح', '7aa': 'ح', 'waw': 'و', 'zaal': 'ذ',
+    'haa': 'ھ', '7aa': 'ح', 'waw': 'و', 'zaal': 'ذ',
     'raa': 'ر', 'zay': 'ز', 'seen': 'س', 'sheen': 'ش',
     'saad': 'ص', 'daad': 'ض', 'taa': 'ت', 'Taa': 'ط',
     'thaa': 'ث', 'Thaa': 'ث', 'ain': 'ع', 'ghayn': 'غ',
