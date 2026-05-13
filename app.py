@@ -32,17 +32,31 @@ with st.sidebar:
 
     st.divider()
     st.subheader("Model Status")
+    st.markdown("**Detection & Tracking**")
     for name, ready in [
-        ("Car Detector (YOLOv11n COCO)", True),
+        ("Plate Detector (YOLOv11m V1)", True),
+        ("Car Detector (YOLOv26s)", True),
         ("Car Tracker (ByteTrack)", True),
-        ("Plate Detector (YOLOv11m)", True),
-        ("Plate OCR (YOLOv11m)", True),
-        ("Seatbelt (Coming Soon)", False),
+    ]:
+        st.markdown(f"{'🟢' if ready else '⚪'} {name}")
+
+    st.markdown("**OCR Models**")
+    for name, ready in [
+        ("OCR V1 (YOLOv11m)", True),
+        ("OCR V2 (YOLOv26m)", True),
+        ("OCR V2 Weighted-3 (YOLOv26m)", True),
+    ]:
+        st.markdown(f"{'🟢' if ready else '⚪'} {name}")
+
+    st.markdown("**Enhancement**")
+    for name, ready in [
+        ("LapSRN (AI Light)", True),
+        ("Real-ESRGAN (AI Heavy)", True),
     ]:
         st.markdown(f"{'🟢' if ready else '⚪'} {name}")
 
     st.divider()
-    st.caption("v1.0 | RADAR Project")
+    st.caption("v2.0 | RADAR Project")
 
 tab_photo, tab_video = st.tabs(["📷 Photo Mode", "🎬 Video Mode"])
 

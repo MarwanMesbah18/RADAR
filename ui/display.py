@@ -1,7 +1,7 @@
 import streamlit as st
 import cv2
 import numpy as np
-from core.enhancement import enhance_lapsrn
+from core.enhancement import enhance_lapsrn, enhance_realesrgan
 from core.plate_ocr import ocr_plate
 
 
@@ -58,12 +58,13 @@ def show_vehicle_analysis(v):
             st.markdown(f"**Confidence:** `{v.plate_ocr.confidence:.0%}`")
 
 
-def _render_model_row(plate_crop, lapsrn_img, label, version):
-    """Render one 2-column row (Original + LapSRN) for a given OCR model version."""
-    col_orig, col_lap = st.columns(2)
+def _render_model_row(plate_crop, lapsrn_img, esrgan_img, label, version):
+    """Render one 3-column row (Original + LapSRN + Real-ESRGAN) for a given OCR model version."""
+    col_orig, col_lap, col_esrgan = st.columns(3)
 
     ocr_orig = ocr_plate(plate_crop, model_version=version)
     ocr_lap = ocr_plate(lapsrn_img, model_version=version)
+    ocr_esrgan = ocr_plate(esrgan_img, model_version=version)
 
     with col_orig:
         st.markdown("**Original**")
@@ -83,13 +84,24 @@ def _render_model_row(plate_crop, lapsrn_img, label, version):
         st.markdown(f"Plate: `{ocr_lap.text or '—'}`")
         st.markdown(f"Confidence: `{ocr_lap.confidence:.0%}`")
 
+    with col_esrgan:
+        st.markdown("**Real-ESRGAN (AI)**")
+        if ocr_esrgan.annotated_image is not None:
+            st.image(ocr_esrgan.annotated_image)
+        else:
+            st.image(esrgan_img, channels="BGR")
+        st.markdown(f"Plate: `{ocr_esrgan.text or '—'}`")
+        st.markdown(f"Confidence: `{ocr_esrgan.confidence:.0%}`")
+
 
 def show_enhancement_comparison(plate_crop):
-    """Show 2-column enhancement + OCR comparison across all OCR models.
+    """Show 3-column enhancement + OCR comparison across all OCR models.
 
-    Each model version gets its own row. Columns: Original, LapSRN.
+    Each model version gets its own row. Columns: Original, LapSRN, Real-ESRGAN.
+    Only annotated images are shown (plain image as fallback).
     """
     lapsrn_img = enhance_lapsrn(plate_crop)
+    esrgan_img = enhance_realesrgan(plate_crop)
 
     models = [
         ("OCR Model V1", 1),
@@ -101,4 +113,4 @@ def show_enhancement_comparison(plate_crop):
         if i > 0:
             st.markdown("---")
         st.markdown(f"##### {label}")
-        _render_model_row(plate_crop, lapsrn_img, label, version)
+        _render_model_row(plate_crop, lapsrn_img, esrgan_img, label, version)
