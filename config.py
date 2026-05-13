@@ -13,8 +13,8 @@ OCR_CONFIDENCE = 0.55
 OCR_CHAR_MIN_CONFIDENCE = 0.4
 VIDEO_OCR_MIN_CONFIDENCE = 0.75  # Only store readings >= 75% confidence in video
 
-# Car detection (YOLOv11n COCO pretrained)
-CAR_MODEL_PATH = os.path.join(MODELS_DIR, "yolo11n.pt")
+# Car detection (YOLO26s COCO pretrained)
+CAR_MODEL_PATH = os.path.join(MODELS_DIR, "yolo26s_cars.pt")
 CAR_CONFIDENCE = 0.4
 CAR_CLASSES = [2, 5, 7]  # car, bus, truck
 TRACK_BUFFER = 30  # ByteTrack track persistence (frames)
