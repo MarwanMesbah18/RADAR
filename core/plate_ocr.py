@@ -30,21 +30,27 @@ def _to_arabic(class_name):
     return config.FRANCO_TO_ARABIC.get(class_name, class_name)
 
 
-def ocr_yolo(cropped_image):
+def ocr_yolo(cropped_image, model_version=1):
     """Run YOLO character detection on a cropped plate.
 
     Returns (List[CharDetection] sorted by x-position, annotated_image).
+    model_version: 1 = V1, 2 = V2, 3 = V2 Weighted-3.
     """
     # Enhancement operations can produce non-contiguous arrays — YOLO needs contiguous
     if isinstance(cropped_image, np.ndarray):
         cropped_image = np.ascontiguousarray(cropped_image)
 
-    model = ModelManager.get_instance().get_plate_ocr()
+    mgr = ModelManager.get_instance()
+    if model_version == 1:
+        model = mgr.get_plate_ocr()
+    elif model_version == 2:
+        model = mgr.get_plate_ocr_v2()
+    else:
+        model = mgr.get_plate_ocr_v2w()
     result = model.predict(
         source=cropped_image,
         conf=config.OCR_CONFIDENCE,
-        augment=True,
-        imgsz=1280,
+        imgsz=640,
         verbose=False,
     )
 
@@ -72,9 +78,9 @@ def ocr_yolo(cropped_image):
     return detections, annotated
 
 
-def ocr_plate(cropped_image):
+def ocr_plate(cropped_image, model_version=1):
     """Run YOLO OCR on a cropped plate. Returns PlateOCRResult."""
-    yolo_detections, yolo_annotated = ocr_yolo(cropped_image)
+    yolo_detections, yolo_annotated = ocr_yolo(cropped_image, model_version=model_version)
     chars = separate_chars(yolo_detections)
 
     all_confs = [d.confidence for d in yolo_detections]

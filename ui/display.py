@@ -1,7 +1,7 @@
 import streamlit as st
 import cv2
 import numpy as np
-from core.enhancement import enhance_lapsrn, enhance_realesrgan
+from core.enhancement import enhance_lapsrn
 from core.plate_ocr import ocr_plate
 
 
@@ -58,43 +58,47 @@ def show_vehicle_analysis(v):
             st.markdown(f"**Confidence:** `{v.plate_ocr.confidence:.0%}`")
 
 
-def show_enhancement_comparison(plate_crop):
-    """Show 3-column enhancement + OCR comparison: Original, LapSRN, Real-ESRGAN.
+def _render_model_row(plate_crop, lapsrn_img, label, version):
+    """Render one 2-column row (Original + LapSRN) for a given OCR model version."""
+    col_orig, col_lap = st.columns(2)
 
-    Each column shows the image on top, OCR text + confidence below.
-    plate_crop: BGR numpy array of the cropped plate.
-    """
-    col_orig, col_lap, col_esrgan = st.columns(3)
-
-    # Run enhancements
-    lapsrn_img = enhance_lapsrn(plate_crop)
-    esrgan_img = enhance_realesrgan(plate_crop)
-
-    # Run OCR on all three
-    ocr_orig = ocr_plate(plate_crop)
-    ocr_lap = ocr_plate(lapsrn_img)
-    ocr_esrgan = ocr_plate(esrgan_img)
+    ocr_orig = ocr_plate(plate_crop, model_version=version)
+    ocr_lap = ocr_plate(lapsrn_img, model_version=version)
 
     with col_orig:
         st.markdown("**Original**")
-        st.image(plate_crop, channels="BGR")
         if ocr_orig.annotated_image is not None:
             st.image(ocr_orig.annotated_image)
+        else:
+            st.image(plate_crop, channels="BGR")
         st.markdown(f"Plate: `{ocr_orig.text or '—'}`")
         st.markdown(f"Confidence: `{ocr_orig.confidence:.0%}`")
 
     with col_lap:
-        st.markdown("**LapSRN (AI Light)**")
-        st.image(lapsrn_img, channels="BGR")
+        st.markdown("**LapSRN (AI)**")
         if ocr_lap.annotated_image is not None:
             st.image(ocr_lap.annotated_image)
+        else:
+            st.image(lapsrn_img, channels="BGR")
         st.markdown(f"Plate: `{ocr_lap.text or '—'}`")
         st.markdown(f"Confidence: `{ocr_lap.confidence:.0%}`")
 
-    with col_esrgan:
-        st.markdown("**Real-ESRGAN (AI Heavy)**")
-        st.image(esrgan_img, channels="BGR")
-        if ocr_esrgan.annotated_image is not None:
-            st.image(ocr_esrgan.annotated_image)
-        st.markdown(f"Plate: `{ocr_esrgan.text or '—'}`")
-        st.markdown(f"Confidence: `{ocr_esrgan.confidence:.0%}`")
+
+def show_enhancement_comparison(plate_crop):
+    """Show 2-column enhancement + OCR comparison across all OCR models.
+
+    Each model version gets its own row. Columns: Original, LapSRN.
+    """
+    lapsrn_img = enhance_lapsrn(plate_crop)
+
+    models = [
+        ("OCR Model V1", 1),
+        ("OCR Model V2", 2),
+        ("OCR Model V2 (Weighted-3)", 3),
+    ]
+
+    for i, (label, version) in enumerate(models):
+        if i > 0:
+            st.markdown("---")
+        st.markdown(f"##### {label}")
+        _render_model_row(plate_crop, lapsrn_img, label, version)

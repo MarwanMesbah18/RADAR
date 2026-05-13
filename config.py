@@ -6,6 +6,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 PLATE_MODEL_PATH = os.path.join(MODELS_DIR, "yolo11m_car_plate_trained_V1.pt")
 PLATE_OCR_MODEL_PATH = os.path.join(MODELS_DIR, "yolo11m_car_plate_ocr_V1.pt")
+PLATE_OCR_V2_MODEL_PATH = os.path.join(MODELS_DIR, "yolo26m_car_plate_ocr_V2.pt")
+PLATE_OCR_V2W_MODEL_PATH = os.path.join(MODELS_DIR, "yolo26m_car_plate_ocr_V2_Weighted-3.pt")
 
 # Detection thresholds
 PLATE_CONFIDENCE = 0.25
