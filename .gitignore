@@ -7,8 +7,6 @@ __pycache__/
 # Models (uncomment if too large for GitHub)
 # models/*.pt
 
-# Output
-output/
 
 #Datasets
 Datasets/
