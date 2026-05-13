@@ -4,8 +4,8 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Models (uncomment if too large for GitHub)
-# models/*.pt
+# Models (too large for GitHub, use Git LFS later)
+models/*.pt
 
 
 #Datasets
