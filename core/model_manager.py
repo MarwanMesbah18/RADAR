@@ -11,6 +11,7 @@ class ModelManager:
         self._plate_ocr_v2 = None
         self._plate_ocr_v2w = None
         self._car_detector = None
+        self._seatbelt_detector = None
 
     @classmethod
     def get_instance(cls):
@@ -42,3 +43,8 @@ class ModelManager:
         if self._car_detector is None:
             self._car_detector = YOLO(config.CAR_MODEL_PATH)
         return self._car_detector
+
+    def get_seatbelt_detector(self):
+        if self._seatbelt_detector is None:
+            self._seatbelt_detector = YOLO(config.SEATBELT_MODEL_PATH)
+        return self._seatbelt_detector

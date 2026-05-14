@@ -7,7 +7,7 @@ import tempfile
 from pipelines.photo_pipeline import analyze_photo
 from core.plate_detector import detect_plates
 from utils.preprocessing import pil_to_cv2
-from ui.display import show_image, show_enhancement_comparison
+from ui.display import show_image, show_enhancement_comparison, show_seatbelt_badges
 
 
 def _reset():
@@ -119,6 +119,7 @@ def _render_cars_mode(tmp_path):
                 badge_color = "🟢" if has_plate else "🔴"
                 badge_text = "Plate found" if has_plate else "No plate"
                 st.markdown(f"{badge_color} **{badge_text}**")
+                show_seatbelt_badges(v.seatbelt_summary)
                 if v.steps and v.steps.car_crop is not None:
                     st.image(v.steps.car_crop, channels="BGR")
                 if st.button(f"Select Car #{idx + 1}", key=car_keys[idx],
@@ -138,6 +139,7 @@ def _render_cars_mode(tmp_path):
                 with row[fj]:
                     conf = v.plate_detection.confidence
                     st.markdown(f"🟢 **Plate: {conf:.0%}**")
+                    show_seatbelt_badges(v.seatbelt_summary)
                     if v.steps and v.steps.car_crop is not None:
                         st.image(v.steps.car_crop, channels="BGR")
                     if st.button(f"Select Car #{idx + 1}", key=filtered_keys[fi + fj],
@@ -156,7 +158,11 @@ def _render_cars_mode(tmp_path):
     # Show car crop
     if v.steps and v.steps.car_crop is not None:
         st.markdown("**Selected Vehicle**")
-        st.image(v.steps.car_crop, channels="BGR")
+        show_seatbelt_badges(v.seatbelt_summary)
+        if v.steps.seatbelt_annotated is not None:
+            st.image(v.steps.seatbelt_annotated, channels="BGR")
+        else:
+            st.image(v.steps.car_crop, channels="BGR")
 
     if v.plate_detection is None:
         st.info("No plate detected on this car.")

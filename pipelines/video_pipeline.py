@@ -11,6 +11,7 @@ from core.plate_ocr import ocr_yolo
 from core.plate_utils import separate_chars
 from core.plate_aggregator import PlateAggregator, PlateReading
 from core.enhancement import enhance
+from core.seatbelt_detector import detect_seatbelt, get_seatbelt_summary
 from utils.preprocessing import ensure_valid_bbox, put_arabic_text
 
 
@@ -243,6 +244,7 @@ class ScannedCar:
     best_frame_num: int = 0
     first_seen_frame: int = 0
     best_bbox: tuple = None   # (x1, y1, x2, y2) in frame coords
+    seatbelt_summary: dict = None  # seatbelt + mobile detection results
 
 
 @dataclass
@@ -344,6 +346,13 @@ def scan_video_cars(video_path, progress_callback=None):
 
     cap.release()
     cars = sorted(merged, key=lambda c: c.first_seen_frame)
+
+    # Run seatbelt detection on each car's best crop
+    for car in cars:
+        if car.best_crop is not None and car.best_crop.size > 0:
+            seatbelt_dets = detect_seatbelt(car.best_crop)
+            car.seatbelt_summary = get_seatbelt_summary(seatbelt_dets)
+
     return cars
 
 

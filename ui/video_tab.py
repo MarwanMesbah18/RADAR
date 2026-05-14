@@ -2,7 +2,7 @@ import streamlit as st
 import tempfile
 
 from pipelines.video_pipeline import scan_video_cars, find_plate_crops
-from ui.display import show_enhancement_comparison
+from ui.display import show_enhancement_comparison, show_seatbelt_badges
 
 
 def _reset_scan():
@@ -74,6 +74,7 @@ def _render_car_selection(video_path):
             idx = i + j
             with row[j]:
                 st.markdown(f"**Car #{idx + 1}** ({car.car_class})")
+                show_seatbelt_badges(car.seatbelt_summary)
                 if car.best_crop is not None:
                     st.image(car.best_crop, channels="BGR")
                 if st.button(f"Select", key=f"car_sel_{idx}", use_container_width=True):

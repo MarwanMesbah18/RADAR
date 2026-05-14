@@ -8,6 +8,7 @@ from core.car_tracker import track_cars
 from core.plate_detector import detect_plates, PlateDetection
 from core.plate_ocr import ocr_yolo, PlateOCRResult
 from core.plate_utils import separate_chars
+from core.seatbelt_detector import detect_seatbelt, get_seatbelt_summary, draw_seatbelt_detections
 from utils.preprocessing import pil_to_cv2, put_arabic_text
 
 
@@ -17,6 +18,7 @@ class StepImages:
     original: np.ndarray = None
     car_detected: np.ndarray = None
     car_crop: np.ndarray = None
+    seatbelt_annotated: np.ndarray = None
     plate_detected: np.ndarray = None
     plate_crop: np.ndarray = None
     yolo_ocr: np.ndarray = None
@@ -28,6 +30,7 @@ class VehicleAnalysis:
     car_class: str = ""
     plate_detection: PlateDetection = None
     plate_ocr: PlateOCRResult = None
+    seatbelt_summary: dict = None
     steps: StepImages = None
     yolo_detections: list = field(default_factory=list)
     yolo_numbers: list = field(default_factory=list)
@@ -70,12 +73,19 @@ def _analyze_single_car(bgr_image, pil_image, car, car_index, frame_width, frame
         car_crop=car_crop_bgr.copy(),
     )
 
+    # Run seatbelt + mobile detection on car crop
+    seatbelt_dets = detect_seatbelt(car_crop_bgr)
+    seatbelt_summary = get_seatbelt_summary(seatbelt_dets)
+    if seatbelt_dets:
+        steps.seatbelt_annotated = draw_seatbelt_detections(car_crop_bgr, seatbelt_dets)
+
     # Detect plates in car crop
     plate_detections = detect_plates(search_pil)
     if not plate_detections:
         return VehicleAnalysis(
             car_index=car_index,
             car_class=car.class_name,
+            seatbelt_summary=seatbelt_summary,
             steps=steps,
         )
 
@@ -127,6 +137,7 @@ def _analyze_single_car(bgr_image, pil_image, car, car_index, frame_width, frame
         car_class=car.class_name,
         plate_detection=plate_det,
         plate_ocr=plate_ocr,
+        seatbelt_summary=seatbelt_summary,
         steps=steps,
         yolo_detections=yolo_dets,
         yolo_numbers=chars.numbers,

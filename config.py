@@ -21,6 +21,10 @@ CAR_CONFIDENCE = 0.4
 CAR_CLASSES = [2, 5, 7]  # car, bus, truck
 TRACK_BUFFER = 30  # ByteTrack track persistence (frames)
 
+# Seatbelt + mobile detection
+SEATBELT_MODEL_PATH = os.path.join(MODELS_DIR, "seatbelt_mobile_v1.pt")
+SEATBELT_CONFIDENCE = 0.25
+
 # Franco → Arabic character mapping (OCR model uses transliterated class names)
 FRANCO_TO_ARABIC = {
     'alif': 'ا', 'baa': 'ب', 'jeem': 'ج', 'daal': 'د',

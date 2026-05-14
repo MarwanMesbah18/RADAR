@@ -20,6 +20,21 @@ def show_image(img_bgr, caption=None, width=3, max_height=300):
         st.image(rgb, caption=caption)
 
 
+def show_seatbelt_badges(seatbelt_summary):
+    """Show seatbelt/mobile violation badges as colored text."""
+    if not seatbelt_summary:
+        return
+    badges = []
+    if seatbelt_summary.get("has_no_seatbelt"):
+        badges.append(":red[**No Belt**]")
+    if seatbelt_summary.get("has_seatbelt"):
+        badges.append(":green[**Belt**]")
+    if seatbelt_summary.get("has_mobile"):
+        badges.append(":red[**Phone**]")
+    if badges:
+        st.markdown(" ".join(badges))
+
+
 def show_vehicle_analysis(v):
     """Display the full analysis pipeline for a single vehicle."""
     steps = v.steps
