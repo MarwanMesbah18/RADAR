@@ -2,8 +2,8 @@
 
 ## Project Overview
 - Streamlit app (`app.py`) for Egyptian license plate detection + OCR (photo & video modes)
-- Core ML: YOLOv11m (plate detection), YOLOv11m (char OCR), YOLOv11n + ByteTrack (car tracking)
-- Models live in `models/` and are tracked in git (for team sharing)
+- Core ML: YOLOv11m V1 (plate detection), YOLOv11m V1 + YOLO26m V2 + YOLO26m V2-Weighted-3 (char OCR), YOLO26s (car tracking)
+- Models live in `models/` but are gitignored (too large for GitHub — use Git LFS later)
 - Based on ACLPR project at `/home/mesbah/Desktop/Projects/ACLPR`
 
 ## Run
@@ -18,19 +18,20 @@
 ### UI Layer (`ui/`)
 - `ui/display.py` — shared display functions:
   - `show_image(img_bgr, caption, width, max_height)` — centered image with size constraints
-  - `show_enhancement_comparison(plate_crop)` — 3-column comparison (Original, LapSRN, Real-ESRGAN) with annotated OCR images and confidence
+  - `show_enhancement_comparison(plate_crop)` — 3 OCR models x 3 columns (Original, LapSRN, Real-ESRGAN), annotated images only
 - `ui/photo_tab.py` — Photo mode with two buttons:
   - "Detect Plates Directly" — runs plate detection on full image, shows enhancement+OCR comparison
   - "Detect Cars First" — detects cars as clickable image cards (green/red plate badge), user clicks one, shows plate + comparison
+  - "Cars with Plates" filtered section appears below the full car grid
 - `ui/video_tab.py` — Video mode with interactive flow:
   - Scan Video → shows car grid as clickable cards → Manual Mode (auto disabled for now) → plate candidate cards → enhancement comparison
 
 ### Core ML (`core/`)
-- `core/model_manager.py` — singleton that loads YOLO models once (plate detector, plate OCR, car detector)
+- `core/model_manager.py` — singleton loading 5 models: plate detector, 3 OCR models (V1, V2, V2-Weighted-3), car detector
 - `core/plate_detector.py` — `detect_plates(image)` → `List[PlateDetection]` (sorted widest first)
-- `core/plate_ocr.py` — `ocr_yolo()` and `ocr_plate()` — YOLO char detection with `augment=True, imgsz=1280`
+- `core/plate_ocr.py` — `ocr_yolo(img, model_version=1|2|3)` and `ocr_plate(img, model_version=1|2|3)` — YOLO char detection with `imgsz=640` (no augment — YOLO26 models don't support it)
 - `core/car_tracker.py` — `track_cars(frame, persist)` → `List[CarTrack]` using YOLO + ByteTrack
-- `core/enhancement.py` — AI super-resolution: `enhance_lapsrn()` and `enhance_realesrgan()` (no basic method)
+- `core/enhancement.py` — AI super-resolution: `enhance_lapsrn()` and `enhance_realesrgan()`
 - `core/plate_utils.py` — `separate_chars()` splits detections into numbers (LTR) and Arabic letters (RTL reversed)
 - `core/plate_aggregator.py` — merges duplicate plate readings in video (used by old process_video)
 
@@ -50,12 +51,14 @@
 ## Key Patterns
 - `ModelManager` singleton loads models ONCE — never call `YOLO(path)` directly in loops
 - `plate_ocr.ocr_yolo()` returns `List[CharDetection]` sorted by x-position (left-to-right)
-- OCR uses `augment=True` (test-time augmentation) and `imgsz=1280` for better accuracy
+- OCR uses `imgsz=640` — MUST match training imgsz or predictions break. No `augment=True` — YOLO26 models don't support test-time augmentation
+- `ocr_plate()` takes `model_version`: 1=V1 (YOLOv11m), 2=V2 (YOLO26m), 3=V2 Weighted-3 (YOLO26m)
 - Numbers on plates display LTR (no reversal), Arabic letters display RTL (reversed)
 - Car selection in both tabs uses clickable image cards with plate/no-plate badges
-- Enhancement comparison shows Original + LapSRN + Real-ESRGAN with annotated OCR and confidence
-- Video pipeline matches cars by spatial proximity (IoU on best_bbox), not ByteTrack track IDs
+- Enhancement comparison runs all 3 OCR models side-by-side (V1, V2, V2 Weighted-3), each with 3 columns (Original, LapSRN, Real-ESRGAN). Shows annotated images only (plain image as fallback)
+- ByteTrack assigns fresh track IDs on each video pass — NEVER match cars by track_id across passes. Use spatial proximity (IoU on best_bbox) instead
 - `find_plate_crops` passes the full `ScannedCar` object, not just track_id
+- LapSRN can crash on certain image shapes (cv2.error in merge) — always wrap `_lapsrn_model.upsample()` in try/except with fallback
 
 ## Next Steps
 - **Auto Mode** (disabled) — auto-select best plate crop, run OCR, show results without user picking
@@ -65,6 +68,10 @@
 - **Color classification** — config has `COLOR_KMEANS_CLUSTERS` but not implemented
 - **Speed estimation** — using car tracking between frames
 - **Notebooks** — has plans for training improvements in `notebooks/`
+- YOLO26m OCR model (V2) trained on `characters_final` dataset (9324 images, 98% full plates, ~5 chars/image)
+- Ultralytics 8.4.46+ supports `model.model.class_weights = torch.tensor(...)` natively for weighted BCE loss
+- Class weighting didn't improve results — normal training with more epochs performed better
+- Kaggle T4: batch=32 and cache=True work fine for YOLO26m at imgsz=640 (~9GB GPU)
 
 ## User Preferences
 - User is a beginner AI developer, based in Egypt, Arabic language context
