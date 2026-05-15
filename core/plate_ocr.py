@@ -34,7 +34,7 @@ def ocr_yolo(cropped_image, model_version=1):
     """Run YOLO character detection on a cropped plate.
 
     Returns (List[CharDetection] sorted by x-position, annotated_image).
-    model_version: 1 = V1, 2 = V2, 3 = V2 Weighted-3.
+    model_version: 1 = V1, 2 = V2, 3 = V2 Weighted.
     """
     # Enhancement operations can produce non-contiguous arrays — YOLO needs contiguous
     if isinstance(cropped_image, np.ndarray):

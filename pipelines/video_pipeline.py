@@ -244,7 +244,11 @@ class ScannedCar:
     best_frame_num: int = 0
     first_seen_frame: int = 0
     best_bbox: tuple = None   # (x1, y1, x2, y2) in frame coords
-    seatbelt_summary: dict = None  # seatbelt + mobile detection results
+    seatbelt_summary: dict = None
+    all_bboxes: dict = field(default_factory=dict)     # frame_num -> bbox
+    frames_visible: set = field(default_factory=set)    # frames where car appeared
+    plate_candidates: list = field(default_factory=list)  # List[PlateCandidate]
+    has_plate: bool = False
 
 
 @dataclass
@@ -440,3 +444,201 @@ def find_plate_crops(video_path, scanned_car, top_n=5):
     # Sort by crop area descending, take top_n
     candidates.sort(key=lambda c: c.crop_area, reverse=True)
     return candidates[:top_n]
+
+
+# ── Single-pass scan: cars + plates in one pass ──
+
+
+def scan_video_full(video_path, progress_callback=None):
+    """Single-pass scan: find all cars AND their plate candidates.
+
+    Replaces the old two-pass approach (scan_video_cars + find_plate_crops).
+    During tracking, plate detection runs on each car crop so plates are
+    naturally associated with the correct car — no spatial re-matching needed.
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Cannot open video: {video_path}")
+
+    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    all_cars: dict[int, ScannedCar] = {}
+    current_frame = 0
+    total_plates = 0
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        current_frame += 1
+
+        try:
+            car_tracks = track_cars(frame, persist=True)
+
+            for car in car_tracks:
+                car_crop = _crop_car(frame, car.bbox)
+                if car_crop.size == 0:
+                    continue
+
+                car_bbox = tuple(int(v) for v in car.bbox)
+
+                if car.track_id not in all_cars:
+                    all_cars[car.track_id] = ScannedCar(
+                        track_id=car.track_id,
+                        car_class=car.class_name,
+                        first_seen_frame=current_frame,
+                        all_bboxes={},
+                        frames_visible=set(),
+                        plate_candidates=[],
+                    )
+
+                car_obj = all_cars[car.track_id]
+                car_obj.all_bboxes[current_frame] = car_bbox
+                car_obj.frames_visible.add(current_frame)
+
+                # Update best crop (largest)
+                curr_area = car_crop.shape[0] * car_crop.shape[1]
+                prev_area = car_obj.best_crop.shape[0] * car_obj.best_crop.shape[1] if car_obj.best_crop is not None else 0
+                if curr_area > prev_area:
+                    car_obj.best_crop = car_crop.copy()
+                    car_obj.best_frame_num = current_frame
+                    car_obj.best_bbox = car_bbox
+
+                # Skip plate detection if already have enough candidates
+                if len(car_obj.plate_candidates) >= config.MAX_PLATE_CANDIDATES_PER_CAR:
+                    continue
+
+                # Run plate detection on this car crop
+                car_pil = Image.fromarray(cv2.cvtColor(car_crop, cv2.COLOR_BGR2RGB))
+                plate_dets = detect_plates(car_pil)
+                if not plate_dets:
+                    continue
+
+                plate = plate_dets[0]
+                px1, py1, px2, py2 = [int(v) for v in plate.bbox]
+                cx1, cy1 = int(car.bbox[0]), int(car.bbox[1])
+                fx1, fy1 = cx1 + px1, cy1 + py1
+                fx2, fy2 = cx1 + px2, cy1 + py2
+                fx1, fy1, fx2, fy2 = ensure_valid_bbox(
+                    (fx1, fy1, fx2, fy2), frame_width, frame_height
+                )
+
+                plate_crop = frame[fy1:fy2, fx1:fx2]
+                if plate_crop.size == 0:
+                    continue
+
+                crop_area = (fx2 - fx1) * (fy2 - fy1)
+
+                # Deduplicate by area similarity
+                is_dup = any(
+                    abs(c.crop_area - crop_area) / max(crop_area, 1) < config.PLATE_DEDUP_AREA_TOLERANCE
+                    for c in car_obj.plate_candidates
+                )
+                if is_dup:
+                    continue
+
+                car_obj.plate_candidates.append(PlateCandidate(
+                    frame_num=current_frame,
+                    plate_crop=plate_crop.copy(),
+                    plate_bbox=(fx1, fy1, fx2, fy2),
+                    car_crop=car_crop.copy(),
+                    crop_area=crop_area,
+                ))
+                car_obj.has_plate = True
+                total_plates += 1
+
+        except Exception as e:
+            print(f"Error scanning frame {current_frame}: {e}")
+
+        if progress_callback:
+            progress_callback(current_frame / max(total_frames, 1), {
+                "frame": current_frame,
+                "total": total_frames,
+                "cars": len(all_cars),
+                "plates": total_plates,
+            })
+
+    cap.release()
+
+    # Deduplicate car tracks (merge split track IDs belonging to same car)
+    car_list = list(all_cars.values())
+    merged = _deduplicate_cars(car_list)
+
+    # Sort plate candidates by area (largest first), limit per car
+    for car in merged:
+        car.plate_candidates.sort(key=lambda c: c.crop_area, reverse=True)
+        car.plate_candidates = car.plate_candidates[:config.MAX_PLATE_CANDIDATES_PER_CAR]
+
+    # Run seatbelt detection on each car's best crop
+    for car in merged:
+        if car.best_crop is not None and car.best_crop.size > 0:
+            seatbelt_dets = detect_seatbelt(car.best_crop)
+            car.seatbelt_summary = get_seatbelt_summary(seatbelt_dets)
+
+    return sorted(merged, key=lambda c: c.first_seen_frame)
+
+
+def _deduplicate_cars(car_list):
+    """Merge car tracks that belong to the same physical car.
+
+    Key improvement: cars visible in the same frame are NEVER merged
+    (they are genuinely different cars). Only merge tracks of same class
+    with high IoU that were never seen simultaneously.
+    """
+    merged = []
+    used = set()
+
+    for i, c1 in enumerate(car_list):
+        if i in used:
+            continue
+        group = [c1]
+        for j in range(i + 1, len(car_list)):
+            if j in used:
+                continue
+            c2 = car_list[j]
+            # Must be same class
+            if c1.car_class != c2.car_class:
+                continue
+            # Never merge cars visible in the same frame
+            if c1.frames_visible & c2.frames_visible:
+                continue
+            # Must have high bbox IoU
+            if not (c1.best_bbox and c2.best_bbox):
+                continue
+            if _bbox_iou(c1.best_bbox, c2.best_bbox) < config.CAR_MERGE_IOU_THRESHOLD:
+                continue
+            group.append(c2)
+            used.add(j)
+
+        # Pick best crop from group
+        best = max(group, key=lambda c: c.best_crop.shape[0] * c.best_crop.shape[1] if c.best_crop is not None else 0)
+
+        # Merge plate candidates from all tracks in group
+        all_plates = []
+        for c in group:
+            all_plates.extend(c.plate_candidates)
+
+        # Deduplicate merged plates by area
+        seen_areas = set()
+        unique_plates = []
+        for p in sorted(all_plates, key=lambda p: p.crop_area, reverse=True):
+            area_key = round(p.crop_area, -1)
+            if area_key not in seen_areas:
+                unique_plates.append(p)
+                seen_areas.add(area_key)
+
+        best.plate_candidates = unique_plates[:config.MAX_PLATE_CANDIDATES_PER_CAR]
+        best.has_plate = len(best.plate_candidates) > 0
+
+        # Merge trajectory data
+        for c in group:
+            if c is not best:
+                best.all_bboxes.update(c.all_bboxes)
+                best.frames_visible.update(c.frames_visible)
+
+        merged.append(best)
+        used.add(i)
+
+    return merged

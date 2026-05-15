@@ -4,16 +4,28 @@ import numpy as np
 import cv2
 import tempfile
 
-from pipelines.photo_pipeline import analyze_photo
+from pipelines.photo_pipeline import (
+    _load_image, detect_cars_step, analyze_plates_step,
+    generate_interior_summary, run_multi_size_seatbelt,
+    StepImages, VehicleAnalysis,
+)
 from core.plate_detector import detect_plates
+from core.seatbelt_detector import detect_seatbelt, get_seatbelt_summary, draw_seatbelt_detections
+from core.enhancement import enhance_lapsrn, enhance_realesrgan
 from utils.preprocessing import pil_to_cv2
-from ui.display import show_image, show_enhancement_comparison, show_seatbelt_badges
+from ui.display import (
+    show_image, show_enhancement_comparison,
+    show_interior_table,
+    show_final_summary,
+)
 
 
 def _reset():
-    for key in ["photo_mode", "photo_result", "photo_direct_plates",
-                "selected_car", "tmp_file"]:
-        st.session_state.pop(key, None)
+    for key in list(st.session_state.keys()):
+        if key in ("photo_upload",):
+            continue
+        if key.startswith("photo_") or key in ("selected_car", "tmp_file"):
+            st.session_state.pop(key, None)
 
 
 def render_photo_tab():
@@ -39,145 +51,279 @@ def render_photo_tab():
 
     st.markdown("---")
 
-    # Two mode buttons
-    col_b1, col_b2 = st.columns(2)
-    with col_b1:
-        btn_direct = st.button("🔍 Detect Plates Directly", type="primary",
-                               use_container_width=True)
-    with col_b2:
-        btn_cars = st.button("🚗 Detect Cars First", type="primary",
-                             use_container_width=True)
-
-    if btn_direct:
+    if st.button("Analyze", type="primary", use_container_width=True):
         _reset()
-        st.session_state["photo_mode"] = "direct"
-    elif btn_cars:
-        _reset()
-        st.session_state["photo_mode"] = "cars"
+        st.session_state["photo_analyze_clicked"] = True
 
-    mode = st.session_state.get("photo_mode")
-    if mode == "direct":
-        _render_direct_mode(tmp_path)
-    elif mode == "cars":
-        _render_cars_mode(tmp_path)
-
-
-def _render_direct_mode(tmp_path):
-    """Detect plates directly on the full image."""
-    if "photo_direct_plates" not in st.session_state:
-        with st.spinner("Detecting plates..."):
-            pil_img = Image.open(tmp_path).convert("RGB")
-            plates = detect_plates(pil_img)
-            st.session_state["photo_direct_plates"] = plates
-
-    plates = st.session_state["photo_direct_plates"]
-
-    if not plates:
-        st.warning("No plates detected on this image.")
+    if not st.session_state.get("photo_analyze_clicked"):
         return
 
-    st.success(f"Found {len(plates)} plate(s)")
-    st.markdown("---")
+    # ── Step 1: Detect vehicles ──
+    if "photo_cars_detected" not in st.session_state:
+        pil_img, bgr_img = _load_image(tmp_path)
+        with st.spinner("Detecting vehicles..."):
+            car_tracks, annotated = detect_cars_step(bgr_img)
+        st.session_state["photo_pil"] = pil_img
+        st.session_state["photo_bgr"] = bgr_img
+        st.session_state["photo_car_tracks"] = car_tracks
+        st.session_state["photo_annotated"] = annotated
+        st.session_state["photo_cars_detected"] = True
 
-    for i, plate in enumerate(plates):
-        st.markdown(f"#### Plate #{i + 1} (confidence: {plate.confidence:.0%})")
-        plate_bgr = pil_to_cv2(plate.cropped_image)
-        show_enhancement_comparison(plate_bgr)
-        if i < len(plates) - 1:
-            st.markdown("---")
+    car_tracks = st.session_state.get("photo_car_tracks", [])
 
-
-def _render_cars_mode(tmp_path):
-    """Detect cars first, let user select, then detect plate."""
-    if "photo_result" not in st.session_state:
-        with st.spinner("Detecting cars..."):
-            st.session_state["photo_result"] = analyze_photo(tmp_path, multi_car=True)
-
-    result = st.session_state["photo_result"]
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Cars Found", result.cars_found)
-    col2.metric("Plates Found", result.plates_found)
-    col3.metric("Time", f"{result.processing_time:.2f}s")
-
-    if result.cars_found == 0:
+    if not car_tracks:
         st.warning("No vehicles detected.")
+        _render_fallback_plates()
         return
+
+    # Show detected vehicles
+    show_image(st.session_state["photo_annotated"],
+               f"Detected {len(car_tracks)} vehicle(s)", width=5)
+
+    # ── Car selection grid ──
+    st.markdown("### Select a Vehicle")
+    bgr_img = st.session_state["photo_bgr"]
+    _render_car_grid(car_tracks, bgr_img)
 
     st.markdown("---")
 
-    # Clickable car cards in a grid
-    cols_per_row = 4
-    car_keys = [f"car_btn_{i}" for i in range(len(result.vehicles))]
+    # ── Run analysis for selected car ──
+    idx = st.session_state.get("selected_car")
+    if idx is None or idx >= len(car_tracks):
+        st.info("Click a vehicle above to run analysis on it.")
+        return
 
-    for i in range(0, len(result.vehicles), cols_per_row):
+    _render_car_analysis(car_tracks[idx], idx)
+
+
+def _render_car_grid(car_tracks, bgr_img):
+    """Show clickable car cards — just the car images."""
+    cols_per_row = 4
+    for i in range(0, len(car_tracks), cols_per_row):
         row = st.columns(cols_per_row)
-        for j, v in enumerate(result.vehicles[i:i + cols_per_row]):
+        for j, car in enumerate(car_tracks[i:i + cols_per_row]):
             idx = i + j
             with row[j]:
-                has_plate = v.plate_detection is not None
-                badge_color = "🟢" if has_plate else "🔴"
-                badge_text = "Plate found" if has_plate else "No plate"
-                st.markdown(f"{badge_color} **{badge_text}**")
-                show_seatbelt_badges(v.seatbelt_summary)
-                if v.steps and v.steps.car_crop is not None:
-                    st.image(v.steps.car_crop, channels="BGR")
-                if st.button(f"Select Car #{idx + 1}", key=car_keys[idx],
-                             use_container_width=True):
+                cx1, cy1, cx2, cy2 = [int(v) for v in car.bbox]
+                h, w = bgr_img.shape[:2]
+                crop = bgr_img[max(0, cy1):min(h, cy2), max(0, cx1):min(w, cx2)]
+                st.markdown(f"**#{idx + 1}** {car.class_name}")
+                if crop.size > 0:
+                    st.image(crop, channels="BGR")
+                if st.button("Select", key=f"car_btn_{idx}", use_container_width=True):
+                    for k in ["car_vehicle", "car_seatbelt_summary",
+                              "car_orig_dets", "car_orig_img",
+                              "car_lap_dets", "car_lap_img",
+                              "car_esrgan_dets", "car_esrgan_img"]:
+                        st.session_state.pop(k, None)
                     st.session_state["selected_car"] = idx
 
-    # ── Filtered: only cars with plates ──
-    cars_with_plates = [(i, v) for i, v in enumerate(result.vehicles) if v.plate_detection is not None]
-    if cars_with_plates:
-        st.markdown("---")
-        st.markdown("### Cars with Plates")
-        filtered_keys = [f"filtered_btn_{i}" for i, _ in cars_with_plates]
 
-        for fi in range(0, len(cars_with_plates), cols_per_row):
-            row = st.columns(cols_per_row)
-            for fj, (idx, v) in enumerate(cars_with_plates[fi:fi + cols_per_row]):
-                with row[fj]:
-                    conf = v.plate_detection.confidence
-                    st.markdown(f"🟢 **Plate: {conf:.0%}**")
-                    show_seatbelt_badges(v.seatbelt_summary)
-                    if v.steps and v.steps.car_crop is not None:
-                        st.image(v.steps.car_crop, channels="BGR")
-                    if st.button(f"Select Car #{idx + 1}", key=filtered_keys[fi + fj],
-                                 use_container_width=True):
-                        st.session_state["selected_car"] = idx
+def _render_car_analysis(car, car_idx):
+    """Run and display full analysis for one car — all stacked vertically."""
+    st.markdown(f"## Vehicle #{car_idx + 1} — {car.class_name}")
+
+    bgr_img = st.session_state["photo_bgr"]
+    cx1, cy1, cx2, cy2 = [int(v) for v in car.bbox]
+    h, w = bgr_img.shape[:2]
+    car_crop = bgr_img[max(0, cy1):min(h, cy2), max(0, cx1):min(w, cx2)]
+
+    if car_crop.size == 0:
+        st.error("Could not crop vehicle region.")
+        return
+
+    # ── Interior Analysis (3 columns, each fills as it completes) ──
+    st.markdown("### Interior Analysis")
+
+    col1, col2, col3 = st.columns(3)
+
+    # Column 1: Original (runs fast, fills first)
+    with col1:
+        st.markdown("**Original**")
+        if "car_orig_dets" not in st.session_state:
+            with st.spinner("Detecting..."):
+                orig_dets = detect_seatbelt(car_crop)
+                orig_img = draw_seatbelt_detections(car_crop, orig_dets) if orig_dets else None
+                st.session_state["car_orig_dets"] = orig_dets
+                st.session_state["car_orig_img"] = orig_img
+        if st.session_state["car_orig_img"] is not None:
+            st.image(st.session_state["car_orig_img"], channels="BGR")
+        _render_person_columns(st.session_state["car_orig_dets"])
+
+    # Column 2: LapSRN (runs after original)
+    with col2:
+        st.markdown("**LapSRN (AI)**")
+        if "car_lap_dets" not in st.session_state:
+            with st.spinner("Enhancing with AI..."):
+                try:
+                    lap_enhanced = enhance_lapsrn(car_crop)
+                    if lap_enhanced is not None:
+                        lap_dets = detect_seatbelt(lap_enhanced)
+                        lap_img = draw_seatbelt_detections(lap_enhanced, lap_dets) if lap_dets else None
+                    else:
+                        lap_dets = []
+                        lap_img = None
+                except Exception:
+                    lap_dets = []
+                    lap_img = None
+                st.session_state["car_lap_dets"] = lap_dets
+                st.session_state["car_lap_img"] = lap_img
+        if st.session_state["car_lap_img"] is not None:
+            st.image(st.session_state["car_lap_img"], channels="BGR")
+        _render_person_columns(st.session_state["car_lap_dets"])
+
+    # Column 3: Real-ESRGAN (runs after LapSRN)
+    with col3:
+        st.markdown("**Real-ESRGAN (AI)**")
+        if "car_esrgan_dets" not in st.session_state:
+            with st.spinner("Enhancing with AI..."):
+                try:
+                    esrgan_enhanced = enhance_realesrgan(car_crop)
+                    if esrgan_enhanced is not None:
+                        esrgan_dets = detect_seatbelt(esrgan_enhanced)
+                        esrgan_img = draw_seatbelt_detections(esrgan_enhanced, esrgan_dets) if esrgan_dets else None
+                    else:
+                        esrgan_dets = []
+                        esrgan_img = None
+                except Exception:
+                    esrgan_dets = []
+                    esrgan_img = None
+                st.session_state["car_esrgan_dets"] = esrgan_dets
+                st.session_state["car_esrgan_img"] = esrgan_img
+        if st.session_state["car_esrgan_img"] is not None:
+            st.image(st.session_state["car_esrgan_img"], channels="BGR")
+        _render_person_columns(st.session_state["car_esrgan_dets"])
+
+    # Merged summary
+    all_dets = (st.session_state["car_orig_dets"]
+                + st.session_state.get("car_lap_dets", [])
+                + st.session_state.get("car_esrgan_dets", []))
+    seatbelt_summary = get_seatbelt_summary(all_dets)
+    st.session_state["car_seatbelt_summary"] = seatbelt_summary
 
     st.markdown("---")
 
-    idx = st.session_state.get("selected_car")
-    if idx is None:
-        st.info("Click a car above to analyze its plate.")
+    # ── Plate Detection & OCR ──
+    st.markdown("### License Plate")
+
+    if "car_vehicle" not in st.session_state:
+        pil_img = st.session_state["photo_pil"]
+        vehicle = VehicleAnalysis(
+            car_index=car_idx,
+            car_class=car.class_name,
+            seatbelt_summary=seatbelt_summary,
+            steps=StepImages(car_crop=car_crop.copy()),
+        )
+        with st.spinner("Detecting license plate and reading characters..."):
+            h_img, w_img = bgr_img.shape[:2]
+            analyze_plates_step(bgr_img, pil_img, [vehicle], w_img, h_img)
+        st.session_state["car_vehicle"] = vehicle
+
+    vehicle = st.session_state["car_vehicle"]
+
+    if vehicle.plate_detection is None:
+        st.info("No license plate detected on this vehicle.")
         return
 
-    v = result.vehicles[idx]
-
-    # Show car crop
-    if v.steps and v.steps.car_crop is not None:
-        st.markdown("**Selected Vehicle**")
-        show_seatbelt_badges(v.seatbelt_summary)
-        if v.steps.seatbelt_annotated is not None:
-            st.image(v.steps.seatbelt_annotated, channels="BGR")
-        else:
-            st.image(v.steps.car_crop, channels="BGR")
-
-    if v.plate_detection is None:
-        st.info("No plate detected on this car.")
-        return
-
-    # Show plate crop with confidence
-    st.markdown(f"**Plate** (confidence: {v.plate_detection.confidence:.0%})")
-    if v.steps and v.steps.plate_crop is not None:
-        st.image(v.steps.plate_crop, channels="BGR")
+    # Show plate crop
+    st.markdown("**Plate Detected**")
+    if vehicle.steps and vehicle.steps.plate_crop is not None:
+        col_plate, col_conf = st.columns([2, 1])
+        with col_plate:
+            show_image(vehicle.steps.plate_crop, width=2)
+        with col_conf:
+            st.metric("Confidence", f"{vehicle.plate_detection.confidence:.0%}")
 
     st.markdown("---")
-    st.markdown("#### Enhancement & OCR Comparison")
 
-    plate_crop = v.steps.plate_crop
-    if plate_crop is None:
-        plate_crop = pil_to_cv2(v.plate_detection.cropped_image)
-
+    # OCR comparison
+    st.markdown("### OCR Comparison")
+    plate_crop = vehicle.steps.plate_crop if vehicle.steps and vehicle.steps.plate_crop is not None else pil_to_cv2(vehicle.plate_detection.cropped_image)
     show_enhancement_comparison(plate_crop)
+
+
+def _render_fallback_plates():
+    """Direct plate detection when no cars found."""
+    if "photo_direct_plates" not in st.session_state:
+        with st.spinner("Trying direct plate detection..."):
+            plates = detect_plates(st.session_state["photo_pil"])
+            st.session_state["photo_direct_plates"] = plates
+
+    plates = st.session_state.get("photo_direct_plates", [])
+    if plates:
+        for i, plate in enumerate(plates):
+            st.markdown(f"#### Plate #{i + 1} (confidence: {plate.confidence:.0%})")
+            show_enhancement_comparison(pil_to_cv2(plate.cropped_image))
+
+
+def _render_person_columns(detections):
+    """Show person results in 2 columns: Passenger (left) | Driver (right)."""
+    if detections is None:
+        st.caption("Processing...")
+        return
+    if not detections:
+        st.caption("No detections")
+        return
+
+    persons = [d for d in detections if d.class_id in (0, 1)]
+    phone_det = next((d for d in detections if d.class_id == 4), None)
+    has_mobile = phone_det is not None
+
+    if not persons:
+        if has_mobile:
+            st.error(":white_check_mark: **Phone** detected")
+        else:
+            st.caption("No persons detected")
+        return
+
+    # Sort rightmost first (highest x = Driver)
+    persons.sort(key=lambda d: d.bbox[0], reverse=True)
+
+    if len(persons) == 1:
+        _render_one_person(persons[0], "Driver", has_mobile, phone_det)
+        return
+
+    # 2+ persons: Passenger (left) | Driver (right)
+    col_pass, col_drv = st.columns(2)
+
+    driver = persons[0]
+    passenger = persons[1]
+
+    with col_pass:
+        _render_one_person(passenger, "Passenger", has_phone=False, phone_det=None)
+
+    with col_drv:
+        _render_one_person(driver, "Driver", has_phone=has_mobile, phone_det=phone_det)
+
+
+def _render_one_person(person, label, has_phone, phone_det=None):
+    """Render one person's seatbelt + phone status with Safe/Not Safe."""
+    has_belt = person.class_id == 1
+
+    st.markdown(f"**{label}:**")
+
+    # Seatbelt: detected means tick, not detected means nothing
+    if has_belt:
+        st.markdown(f":white_check_mark: Seatbelt `{person.confidence:.0%}`")
+    else:
+        st.markdown(f":x: Seatbelt")
+
+    # Phone: detected means tick (with confidence), not detected means nothing
+    if has_phone and phone_det is not None:
+        st.markdown(f":white_check_mark: Phone `{phone_det.confidence:.0%}`")
+    elif has_phone:
+        st.markdown(f":white_check_mark: Phone")
+    else:
+        st.markdown(f":x: Phone")
+
+    # Verdict — only "Safe" or "Not Safe — reason"
+    is_safe = has_belt and not has_phone
+    if is_safe:
+        st.success("**Safe** :white_check_mark:")
+    else:
+        reasons = []
+        if not has_belt:
+            reasons.append("no seatbelt")
+        if has_phone:
+            reasons.append("phone in use")
+        st.error(f"**Not Safe** :x: — {', '.join(reasons)}")

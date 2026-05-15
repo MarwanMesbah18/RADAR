@@ -37,6 +37,7 @@ with st.sidebar:
         ("Plate Detector (YOLOv11m V1)", True),
         ("Car Detector (YOLOv26s)", True),
         ("Car Tracker (ByteTrack)", True),
+        ("Seatbelt + Mobile (YOLOv11m)", True),
     ]:
         st.markdown(f"{'🟢' if ready else '⚪'} {name}")
 
@@ -44,7 +45,7 @@ with st.sidebar:
     for name, ready in [
         ("OCR V1 (YOLOv11m)", True),
         ("OCR V2 (YOLOv26m)", True),
-        ("OCR V2 Weighted-3 (YOLOv26m)", True),
+        ("OCR V2 Weighted (YOLOv26m)", True),
     ]:
         st.markdown(f"{'🟢' if ready else '⚪'} {name}")
 
