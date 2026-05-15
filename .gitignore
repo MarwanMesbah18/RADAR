@@ -22,6 +22,11 @@ Thumbs.db
 # Streamlit
 .streamlit/
 
+# Node
+node_modules/
+package.json
+package-lock.json
+
 # Temp files
 *.tmp
 *.bak
