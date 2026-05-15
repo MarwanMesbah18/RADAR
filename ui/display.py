@@ -1,6 +1,9 @@
 import streamlit as st
 import cv2
 import numpy as np
+import base64
+from io import BytesIO
+from PIL import Image as PILImage
 from core.enhancement import enhance_lapsrn, enhance_realesrgan
 from core.plate_ocr import ocr_plate
 
@@ -137,58 +140,94 @@ def show_interior_text_summary(seatbelt_summary):
 # ── Plate OCR Comparison ──
 
 
-def _render_model_row(plate_crop, lapsrn_img, esrgan_img, label, version):
-    """Render one 3-column row (Original + LapSRN + Real-ESRGAN)."""
-    col_orig, col_lap, col_esrgan = st.columns(3)
-
-    ocr_orig = ocr_plate(plate_crop, model_version=version)
-    ocr_lap = ocr_plate(lapsrn_img, model_version=version)
-    ocr_esrgan = ocr_plate(esrgan_img, model_version=version)
-
-    with col_orig:
-        st.markdown("**Original**")
-        if ocr_orig.annotated_image is not None:
-            st.image(ocr_orig.annotated_image)
-        else:
-            st.image(plate_crop, channels="BGR")
-        st.markdown(f"Plate: `{ocr_orig.text or '—'}`")
-        st.markdown(f"Confidence: `{ocr_orig.confidence:.0%}`")
-
-    with col_lap:
-        st.markdown("**LapSRN (AI)**")
-        if ocr_lap.annotated_image is not None:
-            st.image(ocr_lap.annotated_image)
-        else:
-            st.image(lapsrn_img, channels="BGR")
-        st.markdown(f"Plate: `{ocr_lap.text or '—'}`")
-        st.markdown(f"Confidence: `{ocr_lap.confidence:.0%}`")
-
-    with col_esrgan:
-        st.markdown("**Real-ESRGAN (AI)**")
-        if ocr_esrgan.annotated_image is not None:
-            st.image(ocr_esrgan.annotated_image)
-        else:
-            st.image(esrgan_img, channels="BGR")
-        st.markdown(f"Plate: `{ocr_esrgan.text or '—'}`")
-        st.markdown(f"Confidence: `{ocr_esrgan.confidence:.0%}`")
-
-
 def show_enhancement_comparison(plate_crop):
-    """Show 3-column enhancement + OCR comparison across all OCR models."""
-    lapsrn_img = enhance_lapsrn(plate_crop)
-    esrgan_img = enhance_realesrgan(plate_crop)
+    """Show OCR comparison as a bordered table: images + text per cell."""
+    with st.spinner("Enhancing plate image..."):
+        lapsrn_img = enhance_lapsrn(plate_crop)
+        esrgan_img = enhance_realesrgan(plate_crop)
 
     models = [
-        ("OCR Model V1", 1),
-        ("OCR Model V2", 2),
-        ("OCR Model V2 (Weighted)", 3),
+        ("OCR V1", 1),
+        ("OCR V2", 2),
+        ("OCR V2 (Weighted)", 3),
     ]
 
-    for i, (label, version) in enumerate(models):
-        if i > 0:
-            st.divider()
-        st.markdown(f"##### {label}")
-        _render_model_row(plate_crop, lapsrn_img, esrgan_img, label, version)
+    enhancements = [
+        ("Original", plate_crop, "original"),
+        ("LapSRN (AI)", lapsrn_img, "lapsrn"),
+        ("Real-ESRGAN (AI)", esrgan_img, "esrgan"),
+    ]
+
+    # Run all OCR combinations
+    results = {}
+    for m_label, version in models:
+        for e_label, e_img, e_key in enhancements:
+            results[(m_label, e_key)] = ocr_plate(e_img, model_version=version)
+
+    # CSS for bordered table
+    st.markdown("""<style>
+    .ocr-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .ocr-table th, .ocr-table td {
+        border: 1px solid #555;
+        text-align: center;
+        padding: 10px;
+        vertical-align: middle;
+    }
+    .ocr-table th {
+        background-color: #262730;
+        font-weight: bold;
+        white-space: nowrap;
+    }
+    .ocr-table .row-header {
+        width: 1%;
+        white-space: nowrap;
+    }
+    .ocr-table td {
+        height: 250px;
+    }
+    .ocr-table td img {
+        max-height: 180px;
+        width: auto;
+    }
+    </style>""", unsafe_allow_html=True)
+
+    # Build HTML table
+    html = '<table class="ocr-table">'
+    # Header row
+    html += '<tr><th></th>'
+    for m_label, _ in models:
+        html += f'<th>{m_label}</th>'
+    html += '</tr>'
+
+    # Data rows
+    for e_label, e_img, e_key in enhancements:
+        html += f'<tr><th class="row-header">{e_label}</th>'
+        for m_label, _ in models:
+            r = results[(m_label, e_key)]
+            plate = r.text or "—"
+            conf = f"{r.confidence:.0%}"
+            # Show image as base64 if annotated exists
+            if r.annotated_image is not None:
+                buf = BytesIO()
+                ann_pil = PILImage.fromarray(r.annotated_image)
+                ann_pil.save(buf, format="PNG")
+                b64 = base64.b64encode(buf.getvalue()).decode()
+                img_html = f'<img src="data:image/png;base64,{b64}" style="width:100%"/>'
+            else:
+                rgb = cv2.cvtColor(e_img, cv2.COLOR_BGR2RGB)
+                pil = PILImage.fromarray(rgb)
+                buf = BytesIO()
+                pil.save(buf, format="PNG")
+                b64 = base64.b64encode(buf.getvalue()).decode()
+                img_html = f'<img src="data:image/png;base64,{b64}" style="width:100%"/>'
+            html += f'<td>{img_html}<br/><b>Plate:</b> <code>{plate}</code><br/><b>Confidence:</b> <code>{conf}</code></td>'
+        html += '</tr>'
+
+    html += '</table>'
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # ── Final Summary ──
