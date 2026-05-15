@@ -4,8 +4,11 @@ import numpy as np
 import base64
 from io import BytesIO
 from PIL import Image as PILImage
+import config
 from core.enhancement import enhance_lapsrn, enhance_realesrgan
-from core.plate_ocr import ocr_plate
+from core.plate_ocr import ocr_yolo
+from core.plate_utils import separate_chars
+import config
 
 
 def show_image(img_bgr, caption=None, width=3, max_height=300):
@@ -140,11 +143,65 @@ def show_interior_text_summary(seatbelt_summary):
 # ── Plate OCR Comparison ──
 
 
+# Per-class color palette (YOLO-style, for OCR character annotations)
+_OCR_PALETTE = [
+    (56, 56, 255), (151, 157, 255), (31, 112, 255), (29, 178, 255),
+    (49, 210, 207), (10, 249, 72), (23, 204, 146), (134, 219, 61),
+    (199, 146, 24), (255, 57, 0), (255, 156, 163), (148, 57, 255),
+    (255, 97, 134), (120, 208, 255), (255, 208, 120), (0, 255, 56),
+    (163, 255, 0), (255, 120, 208), (112, 31, 255), (178, 29, 255),
+    (0, 56, 255), (0, 151, 255), (56, 255, 56), (208, 120, 255),
+    (255, 178, 29), (255, 31, 112), (120, 255, 208), (255, 208, 255),
+    (31, 255, 178), (178, 255, 31), (208, 255, 120), (255, 56, 208),
+    (146, 23, 204), (219, 134, 61), (24, 199, 146), (163, 255, 156),
+]
+
+
+def _char_color(class_name):
+    """Get a consistent BGR color for a character class."""
+    return _OCR_PALETTE[hash(class_name) % len(_OCR_PALETTE)]
+
+
+# Reverse mapping: Arabic → Franco (for annotation labels)
+_ARABIC_TO_FRANCO = {v: k for k, v in config.FRANCO_TO_ARABIC.items()}
+
+
+def _draw_ocr_annotations(base_img, detections):
+    """Draw OCR annotations with per-class colors, using Franco class names."""
+    ann = base_img.copy()
+    if isinstance(ann, np.ndarray):
+        ann = np.ascontiguousarray(ann)
+    for d in detections:
+        dx1, dy1, dx2, dy2 = [int(v) for v in d.bbox]
+        color = _char_color(d.class_name)
+        cv2.rectangle(ann, (dx1, dy1), (dx2, dy2), color, 2)
+        # Use Franco name for label (same as YOLO's default plot)
+        franco = _ARABIC_TO_FRANCO.get(d.class_name, d.class_name)
+        label = f"{franco} {d.confidence:.0%}"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        cv2.rectangle(ann, (dx1, dy1 - th - 4), (dx1 + tw + 2, dy1), color, -1)
+        cv2.putText(ann, label, (dx1 + 1, dy1 - 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    # Convert BGR to RGB (YOLO plot returns RGB, so match that)
+    if isinstance(ann, np.ndarray) and len(ann.shape) == 3 and ann.shape[2] == 3:
+        ann = cv2.cvtColor(ann, cv2.COLOR_BGR2RGB)
+    return ann
+
+
 def show_enhancement_comparison(plate_crop):
-    """Show OCR comparison as a bordered table: images + text per cell."""
-    with st.spinner("Enhancing plate image..."):
-        lapsrn_img = enhance_lapsrn(plate_crop)
-        esrgan_img = enhance_realesrgan(plate_crop)
+    """Show OCR comparison as a bordered table with live filtering.
+
+    Enhancement images and OCR raw results are cached in session_state.
+    On each rerun (slider change), only filtering and drawing happens — no model calls.
+    """
+    # ── Cache enhancement images (run ONCE) ──
+    if "enh_comp_lapsrn" not in st.session_state:
+        with st.spinner("Enhancing plate image..."):
+            st.session_state["enh_comp_lapsrn"] = enhance_lapsrn(plate_crop)
+            st.session_state["enh_comp_esrgan"] = enhance_realesrgan(plate_crop)
+
+    lapsrn_img = st.session_state["enh_comp_lapsrn"]
+    esrgan_img = st.session_state["enh_comp_esrgan"]
 
     models = [
         ("OCR V1", 1),
@@ -158,11 +215,36 @@ def show_enhancement_comparison(plate_crop):
         ("Real-ESRGAN (AI)", esrgan_img, "esrgan"),
     ]
 
-    # Run all OCR combinations
-    results = {}
-    for m_label, version in models:
-        for e_label, e_img, e_key in enhancements:
-            results[(m_label, e_key)] = ocr_plate(e_img, model_version=version)
+    # ── Cache raw OCR results (run ONCE at cache-min conf) ──
+    if "enh_comp_ocr_raw" not in st.session_state:
+        raw = {}
+        for m_label, version in models:
+            for e_label, e_img, e_key in enhancements:
+                raw[(m_label, e_key)] = ocr_yolo(
+                    e_img, model_version=version, conf=config.OCR_CONFIDENCE_CACHE
+                )
+        st.session_state["enh_comp_ocr_raw"] = raw
+
+    # ── Filter by current OCR confidence slider ──
+    conf = config.OCR_CONFIDENCE
+    filtered_results = {}
+    for (m_label, e_key), (dets, annotated_img) in st.session_state["enh_comp_ocr_raw"].items():
+        filtered_dets = [d for d in dets if d.confidence >= conf]
+        chars = separate_chars(filtered_dets)
+        all_confs = [d.confidence for d in filtered_dets]
+        avg_conf = sum(all_confs) / len(all_confs) if all_confs else 0.0
+        base_img = next(e_img for _, e_img, ek in enhancements if ek == e_key)
+        # Use original YOLO annotated image if no filtering happened (all pass),
+        # otherwise draw with per-class colors from filtered detections
+        if len(filtered_dets) == len(dets) and annotated_img is not None:
+            display_img = annotated_img
+        else:
+            display_img = _draw_ocr_annotations(base_img, filtered_dets)
+        filtered_results[(m_label, e_key)] = {
+            "text": chars.text or "—",
+            "confidence": f"{avg_conf:.0%}",
+            "display_image": display_img,
+        }
 
     # CSS for bordered table
     st.markdown("""<style>
@@ -206,24 +288,28 @@ def show_enhancement_comparison(plate_crop):
     for e_label, e_img, e_key in enhancements:
         html += f'<tr><th class="row-header">{e_label}</th>'
         for m_label, _ in models:
-            r = results[(m_label, e_key)]
-            plate = r.text or "—"
-            conf = f"{r.confidence:.0%}"
-            # Show image as base64 if annotated exists
-            if r.annotated_image is not None:
-                buf = BytesIO()
-                ann_pil = PILImage.fromarray(r.annotated_image)
-                ann_pil.save(buf, format="PNG")
-                b64 = base64.b64encode(buf.getvalue()).decode()
-                img_html = f'<img src="data:image/png;base64,{b64}" style="width:100%"/>'
+            r = filtered_results[(m_label, e_key)]
+            plate = r["text"]
+            conf_str = r["confidence"]
+            display_img = r["display_image"]
+
+            # Convert to RGB for display
+            if isinstance(display_img, np.ndarray):
+                if len(display_img.shape) == 2:
+                    rgb = cv2.cvtColor(display_img, cv2.COLOR_GRAY2RGB)
+                elif display_img.shape[2] == 3:
+                    # Check if already RGB (from YOLO plot) or BGR
+                    rgb = display_img  # YOLO plot() returns RGB
+                else:
+                    rgb = display_img
             else:
-                rgb = cv2.cvtColor(e_img, cv2.COLOR_BGR2RGB)
-                pil = PILImage.fromarray(rgb)
-                buf = BytesIO()
-                pil.save(buf, format="PNG")
-                b64 = base64.b64encode(buf.getvalue()).decode()
-                img_html = f'<img src="data:image/png;base64,{b64}" style="width:100%"/>'
-            html += f'<td>{img_html}<br/><b>Plate:</b> <code>{plate}</code><br/><b>Confidence:</b> <code>{conf}</code></td>'
+                rgb = display_img
+
+            buf = BytesIO()
+            PILImage.fromarray(rgb).save(buf, format="PNG")
+            b64 = base64.b64encode(buf.getvalue()).decode()
+            img_html = f'<img src="data:image/png;base64,{b64}" style="width:100%"/>'
+            html += f'<td>{img_html}<br/><b>Plate:</b> <code>{plate}</code><br/><b>Confidence:</b> <code>{conf_str}</code></td>'
         html += '</tr>'
 
     html += '</table>'

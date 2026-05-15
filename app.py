@@ -2,7 +2,6 @@ import streamlit as st
 
 import config
 from ui.photo_tab import render_photo_tab
-from ui.video_tab import render_video_tab
 
 st.set_page_config(
     page_title="RADAR - Vehicle Analysis",
@@ -17,26 +16,48 @@ with st.sidebar:
     st.divider()
 
     st.subheader("Detection Settings")
+
+    st.markdown("**Plate Detector** (YOLOv11m V1)")
     config.PLATE_CONFIDENCE = st.slider(
-        "Plate Detection Confidence",
-        min_value=0.05, max_value=0.9, value=config.PLATE_CONFIDENCE, step=0.05,
+        "Plate Confidence",
+        min_value=0.01, max_value=0.99, value=config.PLATE_CONFIDENCE, step=0.01,
+        key="plate_conf",
     )
+
+    st.markdown("**Car Detector** (YOLOv26s)")
+    config.CAR_CONFIDENCE = st.slider(
+        "Car Confidence",
+        min_value=0.01, max_value=0.99, value=config.CAR_CONFIDENCE, step=0.01,
+        key="car_conf",
+    )
+
+    st.markdown("**Seatbelt + Mobile** (YOLOv11m)")
+    config.SEATBELT_CONFIDENCE = st.slider(
+        "Seatbelt Confidence",
+        min_value=0.01, max_value=0.99, value=config.SEATBELT_CONFIDENCE, step=0.01,
+        key="seatbelt_conf",
+    )
+
+    st.markdown("**OCR Models** (V1, V2, V2 Weighted)")
     config.OCR_CONFIDENCE = st.slider(
         "OCR Confidence",
-        min_value=0.05, max_value=0.9, value=config.OCR_CONFIDENCE, step=0.05,
+        min_value=0.01, max_value=0.99, value=config.OCR_CONFIDENCE, step=0.01,
+        key="ocr_conf",
     )
+
+    st.markdown("**Preprocessing**")
     config.PLATE_CROP_MARGIN = st.slider(
         "Plate Crop Margin (px)",
-        min_value=0, max_value=50, value=config.PLATE_CROP_MARGIN, step=2,
+        min_value=0, max_value=100, value=config.PLATE_CROP_MARGIN, step=1,
+        key="crop_margin",
     )
 
     st.divider()
     st.subheader("Model Status")
-    st.markdown("**Detection & Tracking**")
+    st.markdown("**Detection**")
     for name, ready in [
         ("Plate Detector (YOLOv11m V1)", True),
         ("Car Detector (YOLOv26s)", True),
-        ("Car Tracker (ByteTrack)", True),
         ("Seatbelt + Mobile (YOLOv11m)", True),
     ]:
         st.markdown(f"{'🟢' if ready else '⚪'} {name}")
@@ -59,10 +80,4 @@ with st.sidebar:
     st.divider()
     st.caption("v2.0 | RADAR Project")
 
-tab_photo, tab_video = st.tabs(["📷 Photo Mode", "🎬 Video Mode"])
-
-with tab_photo:
-    render_photo_tab()
-
-with tab_video:
-    render_video_tab()
+render_photo_tab()

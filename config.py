@@ -8,22 +8,26 @@ PLATE_MODEL_PATH = os.path.join(MODELS_DIR, "yolo11m_car_plate_trained_V1.pt")
 PLATE_OCR_MODEL_PATH = os.path.join(MODELS_DIR, "yolo11m_car_plate_ocr_V1.pt")
 PLATE_OCR_V2_MODEL_PATH = os.path.join(MODELS_DIR, "yolo26m_car_plate_ocr_V2.pt")
 PLATE_OCR_V2W_MODEL_PATH = os.path.join(MODELS_DIR, "yolo26m_car_plate_ocr_V2_Weighted-3.pt")
+CAR_MODEL_PATH = os.path.join(MODELS_DIR, "yolo26s_cars.pt")
+SEATBELT_MODEL_PATH = os.path.join(MODELS_DIR, "seatbelt_mobile_v1.pt")
 
-# Detection thresholds
+# Detection thresholds (user-adjustable via sidebar)
 PLATE_CONFIDENCE = 0.25
 OCR_CONFIDENCE = 0.55
-OCR_CHAR_MIN_CONFIDENCE = 0.4
-VIDEO_OCR_MIN_CONFIDENCE = 0.75  # Only store readings >= 75% confidence in video
-
-# Car detection (YOLO26s COCO pretrained)
-CAR_MODEL_PATH = os.path.join(MODELS_DIR, "yolo26s_cars.pt")
 CAR_CONFIDENCE = 0.4
-CAR_CLASSES = [2, 5, 7]  # car, bus, truck
-TRACK_BUFFER = 30  # ByteTrack track persistence (frames)
-
-# Seatbelt + mobile detection
-SEATBELT_MODEL_PATH = os.path.join(MODELS_DIR, "seatbelt_mobile_v1.pt")
 SEATBELT_CONFIDENCE = 0.25
+
+# Cache-min thresholds (run models at this conf, then filter client-side)
+PLATE_CONFIDENCE_CACHE = 0.01
+OCR_CONFIDENCE_CACHE = 0.01
+CAR_CONFIDENCE_CACHE = 0.01
+SEATBELT_CONFIDENCE_CACHE = 0.01
+
+# Car detection classes
+CAR_CLASSES = [2, 5, 7]  # car, bus, truck
+
+# OCR
+OCR_CHAR_MIN_CONFIDENCE = 0.4
 
 # Franco → Arabic character mapping (OCR model uses transliterated class names)
 FRANCO_TO_ARABIC = {
@@ -37,23 +41,4 @@ FRANCO_TO_ARABIC = {
 }
 
 # Preprocessing
-MORPH_KERNEL_SIZE = (1, 1)
-BINARY_THRESHOLD = 128
 PLATE_CROP_MARGIN = 20
-
-# Deduplication thresholds
-CAR_MERGE_IOU_THRESHOLD = 0.7
-PLATE_DEDUP_AREA_TOLERANCE = 0.15
-MAX_PLATE_CANDIDATES_PER_CAR = 5
-
-# Color classification
-COLOR_KMEANS_CLUSTERS = 3
-
-# GUI
-WINDOW_TITLE = "RADAR - Vehicle Analysis System"
-WINDOW_WIDTH = 1280
-WINDOW_HEIGHT = 720
-
-# Output
-OUTPUT_DIR = os.path.join(BASE_DIR, "output")
-LOGS_DIR = os.path.join(OUTPUT_DIR, "logs")

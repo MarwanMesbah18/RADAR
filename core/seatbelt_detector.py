@@ -21,21 +21,23 @@ class SeatbeltDetection:
     class_name: str
 
 
-def detect_seatbelt(image_bgr):
+def detect_seatbelt(image_bgr, conf=None):
     """Run seatbelt + mobile detection on an image crop.
 
     Args:
         image_bgr: numpy array (BGR) — typically a car or windshield crop.
+        conf: Optional confidence threshold override. Uses config.SEATBELT_CONFIDENCE if None.
 
     Returns:
         List[SeatbeltDetection] sorted by confidence (highest first).
     """
     model = ModelManager.get_instance().get_seatbelt_detector()
+    threshold = conf if conf is not None else config.SEATBELT_CONFIDENCE
 
     results = model.predict(
         source=image_bgr,
         imgsz=640,
-        conf=config.SEATBELT_CONFIDENCE,
+        conf=threshold,
         verbose=False,
     )
 
@@ -88,14 +90,16 @@ def draw_seatbelt_detections(image_bgr, detections):
     annotated = image_bgr.copy()
     h, w = annotated.shape[:2]
 
+    font_scale = 0.7
+    thickness = 2
     for det in detections:
         x1, y1, x2, y2 = [int(v) for v in det.bbox]
         color = colors.get(det.class_id, (128, 128, 128))
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
         label = f"{det.class_name} {det.confidence:.0%}"
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        cv2.rectangle(annotated, (x1, y1 - th - 6), (x1 + tw + 4, y1), color, -1)
-        cv2.putText(annotated, label, (x1 + 2, y1 - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+        cv2.rectangle(annotated, (x1, y1 - th - 8), (x1 + tw + 6, y1), color, -1)
+        cv2.putText(annotated, label, (x1 + 3, y1 - 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), thickness)
 
     return annotated

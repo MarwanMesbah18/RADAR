@@ -13,17 +13,19 @@ class PlateDetection:
     cropped_image: Image.Image
 
 
-def detect_plates(image):
+def detect_plates(image, conf=None):
     """Detect license plates in an image.
 
     Args:
         image: PIL Image, numpy array (RGB), or file path string.
+        conf: Optional confidence threshold override. Uses config.PLATE_CONFIDENCE if None.
 
     Returns:
         List of PlateDetection objects, sorted by bbox width (widest first).
     """
     model = ModelManager.get_instance().get_plate_detector()
-    results = model.predict(source=image, conf=config.PLATE_CONFIDENCE, verbose=False)
+    threshold = conf if conf is not None else config.PLATE_CONFIDENCE
+    results = model.predict(source=image, conf=threshold, verbose=False)
 
     # Get original image as PIL for cropping
     if isinstance(image, str):

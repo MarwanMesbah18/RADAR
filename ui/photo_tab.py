@@ -3,7 +3,10 @@ from PIL import Image
 import numpy as np
 import cv2
 import tempfile
+import os
+import glob
 
+import config
 from pipelines.photo_pipeline import (
     _load_image, detect_cars_step, analyze_plates_step,
     generate_interior_summary, run_multi_size_seatbelt,
@@ -19,6 +22,9 @@ from ui.display import (
     show_final_summary,
 )
 
+# Sample images folder
+SAMPLE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Test", "Photos")
+
 
 def _reset():
     for key in list(st.session_state.keys()):
@@ -28,21 +34,67 @@ def _reset():
             st.session_state.pop(key, None)
 
 
+def _render_sample_images():
+    """Show sample images as a compact clickable gallery."""
+    if not os.path.isdir(SAMPLE_DIR):
+        return
+
+    samples = sorted(glob.glob(os.path.join(SAMPLE_DIR, "*.[jJ][pP][gG]"))
+                     + glob.glob(os.path.join(SAMPLE_DIR, "*.[pP][nN][gG]"))
+                     + glob.glob(os.path.join(SAMPLE_DIR, "*.[jJ][pP][eE][gG]")))
+
+    if not samples:
+        return
+
+    with st.expander("Sample Images", expanded=False):
+        # Compact grid: many columns so cards stick together
+        cols_per_row = min(len(samples), 8)
+        for i in range(0, len(samples), cols_per_row):
+            row = st.columns(cols_per_row)
+            for j in range(cols_per_row):
+                idx = i + j
+                with row[j]:
+                    if idx < len(samples):
+                        path = samples[idx]
+                        st.image(path)
+                        if st.button("📂", key=f"sample_{idx}",
+                                     help=f"Load {os.path.basename(path)}"):
+                            _reset()
+                            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+                            image = Image.open(path).convert("RGB")
+                            image.save(tmp.name, format="PNG")
+                            tmp.close()
+                            st.session_state["tmp_file"] = tmp.name
+                            st.session_state["photo_sample_selected"] = True
+                            st.rerun()
+
+
 def render_photo_tab():
+    # ── Sample images ──
+    _render_sample_images()
+
+    # ── Upload ──
     uploaded = st.file_uploader(
         "Upload an image", type=["jpg", "jpeg", "png", "bmp", "tiff"],
         key="photo_upload", on_change=_reset,
     )
 
-    if uploaded is None:
-        return
+    # Auto-analyze on upload
+    if uploaded is not None and not st.session_state.get("photo_analyze_clicked"):
+        if "tmp_file" not in st.session_state:
+            image = Image.open(uploaded).convert("RGB")
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+            image.save(tmp.name, format="PNG")
+            tmp.close()
+            st.session_state["tmp_file"] = tmp.name
+            st.session_state["photo_analyze_clicked"] = True
 
-    if "tmp_file" not in st.session_state:
-        image = Image.open(uploaded).convert("RGB")
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-        image.save(tmp.name, format="PNG")
-        tmp.close()
-        st.session_state["tmp_file"] = tmp.name
+    # Sample image selected
+    if st.session_state.get("photo_sample_selected") and not st.session_state.get("photo_analyze_clicked"):
+        st.session_state["photo_analyze_clicked"] = True
+
+    if not st.session_state.get("photo_analyze_clicked") or "tmp_file" not in st.session_state:
+        return
 
     tmp_path = st.session_state["tmp_file"]
     img = cv2.imread(tmp_path)
@@ -51,38 +103,52 @@ def render_photo_tab():
 
     st.markdown("---")
 
-    if st.button("Analyze", type="primary", use_container_width=True):
-        _reset()
-        st.session_state["photo_analyze_clicked"] = True
-
-    if not st.session_state.get("photo_analyze_clicked"):
-        return
-
-    # ── Step 1: Detect vehicles ──
-    if "photo_cars_detected" not in st.session_state:
+    # ── Step 1: Detect vehicles (run ONCE at cache-min confidence) ──
+    if "photo_car_tracks_raw" not in st.session_state:
         pil_img, bgr_img = _load_image(tmp_path)
         with st.spinner("Detecting vehicles..."):
-            car_tracks, annotated = detect_cars_step(bgr_img)
+            car_tracks_raw, _ = detect_cars_step(bgr_img, conf=config.CAR_CONFIDENCE_CACHE)
         st.session_state["photo_pil"] = pil_img
         st.session_state["photo_bgr"] = bgr_img
-        st.session_state["photo_car_tracks"] = car_tracks
-        st.session_state["photo_annotated"] = annotated
-        st.session_state["photo_cars_detected"] = True
+        st.session_state["photo_car_tracks_raw"] = car_tracks_raw
 
-    car_tracks = st.session_state.get("photo_car_tracks", [])
+    car_tracks_raw = st.session_state.get("photo_car_tracks_raw", [])
+
+    # ── Filter by current CAR_CONFIDENCE slider ──
+    car_tracks = [t for t in car_tracks_raw if t.confidence >= config.CAR_CONFIDENCE]
+
+    # Invalidate selection if filtered count changed (selected car may have shifted)
+    prev_count = st.session_state.get("photo_filtered_count")
+    if prev_count is not None and len(car_tracks) != prev_count:
+        st.session_state.pop("selected_car", None)
+        # Clear per-car caches since the index mapping changed
+        for k in ["car_vehicle", "car_seatbelt_summary",
+                  "car_orig_dets", "car_lap_dets", "car_esrgan_dets",
+                  "car_lap_raw", "car_esrgan_raw"]:
+            st.session_state.pop(k, None)
+        for k in list(st.session_state.keys()):
+            if k.startswith("enh_comp_"):
+                st.session_state.pop(k, None)
+    st.session_state["photo_filtered_count"] = len(car_tracks)
 
     if not car_tracks:
-        st.warning("No vehicles detected.")
+        st.warning("No vehicles detected at current threshold.")
         _render_fallback_plates()
         return
 
-    # Show detected vehicles
-    show_image(st.session_state["photo_annotated"],
-               f"Detected {len(car_tracks)} vehicle(s)", width=5)
+    # Re-draw annotated image from filtered tracks
+    bgr_img = st.session_state["photo_bgr"]
+    annotated = bgr_img.copy()
+    for i, car in enumerate(car_tracks):
+        cx1, cy1, cx2, cy2 = [int(v) for v in car.bbox]
+        cv2.rectangle(annotated, (cx1, cy1), (cx2, cy2), (0, 0, 255), 2)
+        cv2.putText(annotated, f"{car.class_name} #{i + 1}",
+                    (cx1, cy1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+    show_image(annotated, f"Detected {len(car_tracks)} vehicle(s)", width=5)
 
     # ── Car selection grid ──
     st.markdown("### Select a Vehicle")
-    bgr_img = st.session_state["photo_bgr"]
     _render_car_grid(car_tracks, bgr_img)
 
     st.markdown("---")
@@ -111,11 +177,15 @@ def _render_car_grid(car_tracks, bgr_img):
                 if crop.size > 0:
                     st.image(crop, channels="BGR")
                 if st.button("Select", key=f"car_btn_{idx}", use_container_width=True):
+                    # Clear per-car analysis cache
                     for k in ["car_vehicle", "car_seatbelt_summary",
-                              "car_orig_dets", "car_orig_img",
-                              "car_lap_dets", "car_lap_img",
-                              "car_esrgan_dets", "car_esrgan_img"]:
+                              "car_orig_dets", "car_lap_dets", "car_esrgan_dets",
+                              "car_lap_raw", "car_esrgan_raw"]:
                         st.session_state.pop(k, None)
+                    # Clear OCR comparison cache
+                    for k in list(st.session_state.keys()):
+                        if k.startswith("enh_comp_"):
+                            st.session_state.pop(k, None)
                     st.session_state["selected_car"] = idx
 
 
@@ -137,62 +207,69 @@ def _render_car_analysis(car, car_idx):
 
     col1, col2, col3 = st.columns(3)
 
-    # Column 1: Original (runs fast, fills first)
+    # Column 1: Original — run ONCE at cache-min conf, filter on each rerun
     with col1:
         st.markdown("**Original**")
         if "car_orig_dets" not in st.session_state:
             with st.spinner("Detecting..."):
-                orig_dets = detect_seatbelt(car_crop)
-                orig_img = draw_seatbelt_detections(car_crop, orig_dets) if orig_dets else None
+                orig_dets = detect_seatbelt(car_crop, conf=config.SEATBELT_CONFIDENCE_CACHE)
                 st.session_state["car_orig_dets"] = orig_dets
-                st.session_state["car_orig_img"] = orig_img
-        if st.session_state["car_orig_img"] is not None:
-            st.image(st.session_state["car_orig_img"], channels="BGR")
-        _render_person_columns(st.session_state["car_orig_dets"])
+        # Filter by current slider
+        filtered = [d for d in st.session_state["car_orig_dets"]
+                     if d.confidence >= config.SEATBELT_CONFIDENCE]
+        if filtered:
+            st.image(draw_seatbelt_detections(car_crop, filtered), channels="BGR")
+        else:
+            st.image(car_crop, channels="BGR")
+        _render_person_columns(filtered)
 
-    # Column 2: LapSRN (runs after original)
+    # Column 2: LapSRN — enhance once, detect once at cache-min, filter on each rerun
     with col2:
         st.markdown("**LapSRN (AI)**")
         if "car_lap_dets" not in st.session_state:
-            with st.spinner("Enhancing with AI..."):
+            with st.spinner("Enhancing & detecting..."):
                 try:
-                    lap_enhanced = enhance_lapsrn(car_crop)
-                    if lap_enhanced is not None:
-                        lap_dets = detect_seatbelt(lap_enhanced)
-                        lap_img = draw_seatbelt_detections(lap_enhanced, lap_dets) if lap_dets else None
+                    lap_raw = enhance_lapsrn(car_crop)
+                    if lap_raw is not None:
+                        st.session_state["car_lap_raw"] = lap_raw
+                        lap_dets = detect_seatbelt(lap_raw, conf=config.SEATBELT_CONFIDENCE_CACHE)
                     else:
                         lap_dets = []
-                        lap_img = None
                 except Exception:
                     lap_dets = []
-                    lap_img = None
                 st.session_state["car_lap_dets"] = lap_dets
-                st.session_state["car_lap_img"] = lap_img
-        if st.session_state["car_lap_img"] is not None:
-            st.image(st.session_state["car_lap_img"], channels="BGR")
-        _render_person_columns(st.session_state["car_lap_dets"])
+        lap_raw = st.session_state.get("car_lap_raw")
+        filtered = [d for d in st.session_state["car_lap_dets"]
+                     if d.confidence >= config.SEATBELT_CONFIDENCE]
+        if lap_raw is not None and filtered:
+            st.image(draw_seatbelt_detections(lap_raw, filtered), channels="BGR")
+        elif lap_raw is not None:
+            st.image(lap_raw, channels="BGR")
+        _render_person_columns(filtered)
 
-    # Column 3: Real-ESRGAN (runs after LapSRN)
+    # Column 3: Real-ESRGAN — same pattern
     with col3:
         st.markdown("**Real-ESRGAN (AI)**")
         if "car_esrgan_dets" not in st.session_state:
-            with st.spinner("Enhancing with AI..."):
+            with st.spinner("Enhancing & detecting..."):
                 try:
-                    esrgan_enhanced = enhance_realesrgan(car_crop)
-                    if esrgan_enhanced is not None:
-                        esrgan_dets = detect_seatbelt(esrgan_enhanced)
-                        esrgan_img = draw_seatbelt_detections(esrgan_enhanced, esrgan_dets) if esrgan_dets else None
+                    esrgan_raw = enhance_realesrgan(car_crop)
+                    if esrgan_raw is not None:
+                        st.session_state["car_esrgan_raw"] = esrgan_raw
+                        esrgan_dets = detect_seatbelt(esrgan_raw, conf=config.SEATBELT_CONFIDENCE_CACHE)
                     else:
                         esrgan_dets = []
-                        esrgan_img = None
                 except Exception:
                     esrgan_dets = []
-                    esrgan_img = None
                 st.session_state["car_esrgan_dets"] = esrgan_dets
-                st.session_state["car_esrgan_img"] = esrgan_img
-        if st.session_state["car_esrgan_img"] is not None:
-            st.image(st.session_state["car_esrgan_img"], channels="BGR")
-        _render_person_columns(st.session_state["car_esrgan_dets"])
+        esrgan_raw = st.session_state.get("car_esrgan_raw")
+        filtered = [d for d in st.session_state["car_esrgan_dets"]
+                     if d.confidence >= config.SEATBELT_CONFIDENCE]
+        if esrgan_raw is not None and filtered:
+            st.image(draw_seatbelt_detections(esrgan_raw, filtered), channels="BGR")
+        elif esrgan_raw is not None:
+            st.image(esrgan_raw, channels="BGR")
+        _render_person_columns(filtered)
 
     # Merged summary
     all_dets = (st.session_state["car_orig_dets"]
@@ -246,12 +323,14 @@ def _render_fallback_plates():
     """Direct plate detection when no cars found."""
     if "photo_direct_plates" not in st.session_state:
         with st.spinner("Trying direct plate detection..."):
-            plates = detect_plates(st.session_state["photo_pil"])
+            plates = detect_plates(st.session_state["photo_pil"], conf=config.PLATE_CONFIDENCE_CACHE)
             st.session_state["photo_direct_plates"] = plates
 
     plates = st.session_state.get("photo_direct_plates", [])
-    if plates:
-        for i, plate in enumerate(plates):
+    # Filter by current slider
+    filtered = [p for p in plates if p.confidence >= config.PLATE_CONFIDENCE]
+    if filtered:
+        for i, plate in enumerate(filtered):
             st.markdown(f"#### Plate #{i + 1} (confidence: {plate.confidence:.0%})")
             show_enhancement_comparison(pil_to_cv2(plate.cropped_image))
 

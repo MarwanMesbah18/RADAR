@@ -4,6 +4,7 @@ import numpy as np
 import cv2
 import time
 
+import config
 from core.car_tracker import track_cars
 from core.plate_detector import detect_plates, PlateDetection
 from core.plate_ocr import ocr_yolo, PlateOCRResult
@@ -288,12 +289,13 @@ def _load_image(image_input):
     return pil_image, bgr_image
 
 
-def detect_cars_step(bgr_image):
+def detect_cars_step(bgr_image, conf=None):
     """Step 1: Detect cars. Returns (car_tracks, annotated_image).
 
     Deduplicates overlapping detections using NMS (IoU > 0.4).
+    conf: Optional confidence override. Uses config.CAR_CONFIDENCE if None.
     """
-    car_tracks = track_cars(bgr_image, persist=False)
+    car_tracks = track_cars(bgr_image, persist=False, conf=conf)
 
     # NMS: sort by area descending, greedily keep boxes that don't overlap
     if len(car_tracks) > 1:
@@ -369,7 +371,7 @@ def analyze_plates_step(bgr_image, pil_image, vehicles, frame_w, frame_h):
     for v in vehicles:
         car_crop_rgb = cv2.cvtColor(v.steps.car_crop, cv2.COLOR_BGR2RGB)
         search_pil = Image.fromarray(car_crop_rgb)
-        plate_detections = detect_plates(search_pil)
+        plate_detections = detect_plates(search_pil, conf=config.PLATE_CONFIDENCE_CACHE)
 
         if not plate_detections:
             continue
