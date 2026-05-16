@@ -8,8 +8,8 @@ Combines:
 Outputs a properly split (70/20/10) YOLO-format dataset ready for training.
 
 Usage:
-  python scripts/generate_char_dataset.py --samples 5     # preview only
-  python scripts/generate_char_dataset.py --count 1500    # full build
+  python training/scripts/generate_char_dataset.py --samples 5     # preview only
+  python training/scripts/generate_char_dataset.py --count 1500    # full build
 """
 
 import argparse

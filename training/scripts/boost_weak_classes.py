@@ -6,8 +6,8 @@ augmented copies (rotation, blur, noise, brightness, contrast), and
 appends them to the dataset. Does NOT modify or delete existing data.
 
 Usage:
-  python scripts/boost_weak_classes.py               # full boost
-  python scripts/boost_weak_classes.py --samples 10   # preview 10
+  python training/scripts/boost_weak_classes.py               # full boost
+  python training/scripts/boost_weak_classes.py --samples 10   # preview 10
 """
 
 import argparse

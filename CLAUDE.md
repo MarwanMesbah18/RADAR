@@ -31,20 +31,31 @@
 - `core/plate_detector.py` — `detect_plates(image, conf=None)` → `List[PlateDetection]` (sorted widest first). Optional `conf` param overrides `config.PLATE_CONFIDENCE`
 - `core/plate_ocr.py` — `ocr_yolo(img, model_version=1|2|3, conf=None)` and `ocr_plate(img, model_version=1|2|3, conf=None)`. Optional `conf` param for cache-min runs
 - `core/car_tracker.py` — `track_cars(frame, persist, conf=None)` → `List[CarTrack]` using YOLO + ByteTrack
-- `core/enhancement.py` — AI super-resolution: `enhance_lapsrn()` and `enhance_realesrgan()`
+- `core/enhancement.py` — AI super-resolution: `enhance_lapsrn()` and `enhance_realesrgan()`. LapSRN model: `models/LapSRN_x2.pb` (placed manually). Real-ESRGAN auto-downloads from GitHub on first use
 - `core/plate_utils.py` — `separate_chars()` splits detections into numbers (LTR) and Arabic letters (RTL reversed)
 - `core/seatbelt_detector.py` — `detect_seatbelt(image_bgr, conf=None)` → `List[SeatbeltDetection]`. `draw_seatbelt_detections()` uses font scale 0.7, thickness 2
-
-### Pipelines (`pipelines/`)
-- `pipelines/photo_pipeline.py` — `detect_cars_step(bgr_image, conf=None)` and `analyze_plates_step(...)` for step-by-step photo analysis
-
-### Utils (`utils/`)
-- `utils/preprocessing.py` — `pil_to_cv2()`, `put_arabic_text()`, `crop_to_bbox()`, `ensure_valid_bbox()`
+- `core/pipeline.py` — `detect_cars_step(bgr_image, conf=None)` and `analyze_plates_step(...)` for step-by-step photo analysis
+- `core/preprocessing.py` — `pil_to_cv2()`, `put_arabic_text()`, `crop_to_bbox()`, `ensure_valid_bbox()`
 
 ### Config (`config.py`)
 - Detection thresholds: `PLATE_CONFIDENCE=0.25`, `OCR_CONFIDENCE=0.55`, `CAR_CONFIDENCE=0.4`, `SEATBELT_CONFIDENCE=0.25`
 - Cache-min thresholds: `PLATE_CONFIDENCE_CACHE=0.01` etc. — used for Roboflow-style live filtering
 - `FRANCO_TO_ARABIC` — maps OCR class names (Franco) to Arabic script
+
+### Assets (`assets/`)
+- `assets/photos/` — sample test images for the gallery
+- `assets/charts/` — training metric charts (used by presentation)
+
+### Training (`training/`)
+- `training/notebooks/` — Jupyter notebooks for model training experiments
+- `training/output/` — training run outputs (results.csv, weights)
+- `training/scripts/` — dataset preparation and utility scripts
+
+### Presentation (`presentation/`)
+- `presentation/create_pptx.js` — Node.js script to generate PowerPoint (uses pptxgenjs)
+- `presentation/generate_charts.py` — Python script to generate training charts from `training/output/` CSVs
+- `presentation/charts/` — generated chart images (also copied to `assets/charts/`)
+- `presentation/` is tracked in git — do NOT gitignore
 
 ## Key Patterns
 
@@ -77,7 +88,7 @@
 - Video mode was removed — tracking was unreliable, plate-first approach too slow. Revisit later with better approach
 - Color classification — config has `COLOR_KMEANS_CLUSTERS` but not implemented
 - Speed estimation — using car tracking between frames
-- Notebooks — training improvements in `notebooks/`
+- Notebooks — training improvements in `training/notebooks/`
 - Kaggle T4: batch=16 for YOLOv11m (batch=32 OOMs), batch=32 for YOLO26m at imgsz=640
 - Roboflow YOLO exports sometimes include polygon data (>5 values per line). Truncate to first 5
 
@@ -89,3 +100,4 @@
 - Car and plate selection should be clickable image cards, not dropdown lists
 - Sample images: compact gallery grid, no text, expandable section
 - Sidebar sliders should allow fine-grained values (step=0.01), user wants to type exact numbers
+- Don't gitignore non-generated project content — user wants presentation/, scripts, etc. tracked and pushed

@@ -3,7 +3,7 @@ from PIL import Image
 import numpy as np
 import config
 from core.model_manager import ModelManager
-from utils.preprocessing import crop_to_bbox
+from core.preprocessing import crop_to_bbox
 
 
 @dataclass

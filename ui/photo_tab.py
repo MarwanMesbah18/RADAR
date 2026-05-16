@@ -7,7 +7,7 @@ import os
 import glob
 
 import config
-from pipelines.photo_pipeline import (
+from core.pipeline import (
     _load_image, detect_cars_step, analyze_plates_step,
     generate_interior_summary, run_multi_size_seatbelt,
     StepImages, VehicleAnalysis,
@@ -15,7 +15,7 @@ from pipelines.photo_pipeline import (
 from core.plate_detector import detect_plates
 from core.seatbelt_detector import detect_seatbelt, get_seatbelt_summary, draw_seatbelt_detections
 from core.enhancement import enhance_lapsrn, enhance_realesrgan
-from utils.preprocessing import pil_to_cv2
+from core.preprocessing import pil_to_cv2
 from ui.display import (
     show_image, show_enhancement_comparison,
     show_interior_table,
@@ -23,7 +23,7 @@ from ui.display import (
 )
 
 # Sample images folder
-SAMPLE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Test", "Photos")
+SAMPLE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "photos")
 
 
 def _reset():

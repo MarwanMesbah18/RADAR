@@ -11,7 +11,7 @@ from core.plate_ocr import ocr_yolo, PlateOCRResult
 from core.plate_utils import separate_chars
 from core.seatbelt_detector import detect_seatbelt, get_seatbelt_summary, draw_seatbelt_detections
 from core.enhancement import enhance_lapsrn, enhance_realesrgan
-from utils.preprocessing import pil_to_cv2, put_arabic_text
+from core.preprocessing import pil_to_cv2, put_arabic_text
 
 
 @dataclass

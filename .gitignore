@@ -5,8 +5,7 @@ __pycache__/
 *.pyo
 
 # Models (too large for GitHub, use Git LFS later)
-models/*.pt
-
+/models
 
 #Datasets
 Datasets/
@@ -30,3 +29,5 @@ package-lock.json
 # Temp files
 *.tmp
 *.bak
+
+/tmp
