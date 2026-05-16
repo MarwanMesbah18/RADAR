@@ -63,6 +63,7 @@ def _render_person_results(detections):
 
     persons = [d for d in detections if d.class_id in (0, 1)]
     has_mobile = any(d.class_id == 4 for d in detections)
+    has_seatbelt_obj = any(d.class_id == 2 for d in detections)
 
     if persons:
         # Sort rightmost first (highest x = Driver in Egyptian cars)
@@ -71,7 +72,7 @@ def _render_person_results(detections):
 
         for i, person in enumerate(persons):
             label = labels[i]
-            has_belt = person.class_id == 1
+            has_belt = person.class_id == 1 or (person.class_id == 0 and has_seatbelt_obj)
 
             # Determine if this person has a phone (only matters for driver)
             person_has_phone = False

@@ -66,8 +66,9 @@ def get_seatbelt_summary(detections):
 
     Returns dict with: has_seatbelt, has_no_seatbelt, has_mobile, annotated_image
     """
-    has_seatbelt = any(d.class_id == 1 for d in detections)
-    has_no_seatbelt = any(d.class_id == 0 for d in detections)
+    has_seatbelt_obj = any(d.class_id == 2 for d in detections)
+    has_seatbelt = any(d.class_id == 1 for d in detections) or has_seatbelt_obj
+    has_no_seatbelt = any(d.class_id == 0 for d in detections) and not has_seatbelt_obj
     has_mobile = any(d.class_id == 4 for d in detections)
 
     return {
