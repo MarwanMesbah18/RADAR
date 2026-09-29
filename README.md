@@ -18,8 +18,23 @@
 ---
 
 <div align="center">
-  <img src="presentation/RADAR_poster_A1.png" alt="RADAR Scientific Poster" width="920"/>
-  <p><em>Figure 1: Full System Blueprint & Scientific Poster — Architectural flow from vehicle localization to super-resolution OCR and cabin violation classification.</em></p>
+  <img src="assets/showcase/car_safety_predictions.jpg" alt="RADAR Real-World Vehicle & Cabin Safety Detections" width="100%"/>
+  <p><em>Figure 1: Real-World Vehicle Detection & Cabin Safety Enforcement — Multi-object test predictions localizing vehicles, windshields, seatbelt compliance, and driver violations in live traffic camera feeds.</em></p>
+</div>
+
+<div align="center">
+  <table width="100%">
+    <tr>
+      <td width="50%" align="center">
+        <img src="assets/showcase/car_mosaic_augmentation.jpg" alt="YOLO Mosaic Data Augmentation on Vehicles" width="100%"/>
+        <p><strong>Figure 2: Multi-Scale Mosaic Data Augmentation</strong><br/>Training-time 16-crop mosaic synthesis with perspective warping, lighting jitter, and scale transformations ensuring detection robustness under extreme sunlight, shadows, and highway speeds.</p>
+      </td>
+      <td width="50%" align="center">
+        <img src="assets/showcase/plate_ocr_predictions.jpg" alt="Egyptian Plate OCR Character Predictions" width="100%"/>
+        <p><strong>Figure 3: Egyptian License Plate Character Extraction</strong><br/>High-confidence character localization and transliterated classification isolating Arabic letters and numerals with automated RTL/LTR directional sorting.</p>
+      </td>
+    </tr>
+  </table>
 </div>
 
 ---
@@ -66,6 +81,15 @@ flowchart TD
     SeatbeltOut --> UnifiedReport
     PhoneOut --> UnifiedReport
 ```
+
+<details>
+  <summary><b>📜 Click to expand: Official Scientific Conference Poster & Full System Blueprint (A1 Format)</b></summary>
+  <br/>
+  <div align="center">
+    <img src="presentation/RADAR_poster_A1.png" alt="RADAR Scientific Poster" width="920"/>
+    <p><em>Figure 4: Full System Blueprint & Scientific Poster — Architectural flow from vehicle localization to super-resolution OCR and cabin violation classification.</em></p>
+  </div>
+</details>
 
 ---
 
@@ -114,7 +138,7 @@ The character recognition model achieved state-of-the-art detection precision on
 
 <div align="center">
   <img src="assets/charts/ocr_v2_overview.png" alt="OCR V2 Training Overview" width="850"/>
-  <p><em>Figure 2: OCR Model Training Evolution — Box Loss, Classification Loss, DFL Loss, and Precision/Recall curves over 80 training epochs.</em></p>
+  <p><em>Figure 5: OCR Model Training Evolution — Box Loss, Classification Loss, DFL Loss, and Precision/Recall curves over 80 training epochs.</em></p>
 </div>
 
 <br/>
@@ -122,7 +146,14 @@ The character recognition model achieved state-of-the-art detection precision on
 <div align="center">
   <img src="assets/charts/ocr_v2_precision_recall.png" alt="OCR V2 Precision & Recall" width="48%"/>
   <img src="assets/charts/ocr_v2_map.png" alt="OCR V2 mAP Curves" width="48%"/>
-  <p><em>Figure 3: Detailed OCR Validation Dynamics — Left: Precision & Recall trajectories; Right: mAP@50 and mAP@50-95 convergence.</em></p>
+  <p><em>Figure 6: Detailed OCR Validation Dynamics — Left: Precision & Recall trajectories; Right: mAP@50 and mAP@50-95 convergence.</em></p>
+</div>
+
+<br/>
+
+<div align="center">
+  <img src="assets/showcase/ocr_per_class_metrics.png" alt="Granular OCR Per-Class Metrics" width="95%"/>
+  <p><em>Figure 7: Granular Per-Class Character Performance — Precision, Recall, and mAP across all 38 Egyptian alphanumeric classes.</em></p>
 </div>
 
 ---
@@ -140,7 +171,7 @@ Trained with multi-source cabin surveillance datasets to isolate driver posture 
 
 <div align="center">
   <img src="assets/charts/seatbelt_overview.png" alt="Seatbelt Training Overview" width="850"/>
-  <p><em>Figure 4: Cabin Safety Enforcement Model Metrics across 78 training epochs.</em></p>
+  <p><em>Figure 8: Cabin Safety Enforcement Model Metrics across 78 training epochs.</em></p>
 </div>
 
 <br/>
@@ -148,7 +179,14 @@ Trained with multi-source cabin surveillance datasets to isolate driver posture 
 <div align="center">
   <img src="assets/charts/seatbelt_precision_recall.png" alt="Seatbelt Precision Recall" width="48%"/>
   <img src="assets/charts/seatbelt_map.png" alt="Seatbelt mAP" width="48%"/>
-  <p><em>Figure 5: Precision, Recall, and mAP progression for Driver Safety Violation detection.</em></p>
+  <p><em>Figure 9: Precision, Recall, and mAP progression for Driver Safety Violation detection.</em></p>
+</div>
+
+<br/>
+
+<div align="center">
+  <img src="assets/showcase/seatbelt_per_class_metrics.png" alt="Cabin Safety Per-Class Metrics" width="95%"/>
+  <p><em>Figure 10: Per-Class In-Cabin Violation Metrics — Precision, Recall, and mAP breakdown across person-seatbelt, person-noseatbelt, and mobile phone usage.</em></p>
 </div>
 
 ---
